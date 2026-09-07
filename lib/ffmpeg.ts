@@ -125,8 +125,10 @@ export async function cutClip(
     // Use the `ass` filter (not `subtitles`) - the caption file already carries its own
     // PlayResX/PlayResY and style block (see lib/subtitles.ts), so no force_style/sizing
     // guesswork is needed here and nothing can silently mis-scale on a tall vertical frame.
+    // filename= must be named explicitly (not passed as a bare positional value) - newer
+    // ffmpeg builds (9.x) reject "ass=/path/to/file" with "No option name near ...".
     const source = videoLabel ? `[${videoLabel}]` : "[0:v]";
-    filters.push(`${source}ass=${escapeForFilterGraph(options.subtitlesPath)}[captioned]`);
+    filters.push(`${source}ass=filename='${escapeForFilterGraph(options.subtitlesPath)}'[captioned]`);
     videoLabel = "captioned";
   }
 
