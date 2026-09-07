@@ -1,12 +1,12 @@
 import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
-import { cutClip } from "@/lib/ffmpeg";
+import { fetchCaptions } from "@/lib/captions";
+import { cutClip, extractAudio } from "@/lib/ffmpeg";
 import { findHighlights } from "@/lib/highlights";
 import { transcribeAudio } from "@/lib/transcribe";
-import type { GeneratedClip, ProcessEvent, ProcessOptions } from "@/lib/types";
+import type { GeneratedClip, ProcessEvent, ProcessOptions, TranscriptSegment } from "@/lib/types";
 import { checkDependencies, downloadVideo, getVideoInfo } from "@/lib/ytdlp";
-import { extractAudio } from "@/lib/ffmpeg";
 
 export const runtime = "nodejs";
 
@@ -60,27 +60,37 @@ export async function POST(request: Request) {
         send({ type: "status", message: "Fetching video info..." });
         const info = await getVideoInfo(options.url);
 
+        send({ type: "status", message: "Checking for existing captions/subtitles..." });
+        let segments: TranscriptSegment[] | null = await fetchCaptions(options.url, workDir);
+
         send({ type: "status", message: `Downloading "${info.title}"...` });
         const videoPath = await downloadVideo(options.url, workDir);
 
-        send({ type: "status", message: "Extracting audio for transcription..." });
-        const audioPath = await extractAudio(videoPath, workDir);
+        if (segments) {
+          send({
+            type: "status",
+            message: `Found existing captions (${segments.length} lines) - skipping audio transcription.`,
+          });
+        } else {
+          send({ type: "status", message: "No captions available - extracting audio for transcription..." });
+          const audioPath = await extractAudio(videoPath, workDir);
 
-        send({ type: "status", message: "Transcribing audio - this can take a while for long videos..." });
-        const segments = await transcribeAudio(audioPath, workDir, (message) => send({ type: "status", message }));
+          send({ type: "status", message: "Transcribing audio - this can take a while for long videos..." });
+          segments = await transcribeAudio(audioPath, workDir, (message) => send({ type: "status", message }));
+        }
 
-        if (segments.length === 0) {
-          throw new Error("Transcription returned no text - the video may have no speech to analyze.");
+        if (!segments || segments.length === 0) {
+          throw new Error("Could not get a transcript - the video may have no speech to analyze.");
         }
 
         send({
           type: "status",
-          message: `Transcript ready (${segments.length} segments). Asking Claude to find the best parts...`,
+          message: `Transcript ready (${segments.length} segments). Asking the model to find the best parts...`,
         });
         const highlights = await findHighlights(segments, info, options);
 
         if (highlights.length === 0) {
-          throw new Error("Claude didn't return any candidate clips - try a different video or lower the clip count.");
+          throw new Error("The model didn't return any candidate clips - try a different video or lower the clip count.");
         }
 
         send({ type: "status", message: `Found ${highlights.length} candidate clips. Cutting video...` });

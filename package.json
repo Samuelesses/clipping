@@ -10,7 +10,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.0",
     "next": "^15.5.4",
     "openai": "^6.9.0",
     "react": "^19.2.0",
