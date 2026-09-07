@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import { fetchCaptions } from "@/lib/captions";
-import { cutClip, extractAudio, getVideoDimensions } from "@/lib/ffmpeg";
+import { cutClip, extractAudio, getVideoDimensions, supportsBurnedCaptions } from "@/lib/ffmpeg";
 import { findHighlights } from "@/lib/highlights";
 import { writeClipAss } from "@/lib/subtitles";
 import { transcribeAudio } from "@/lib/transcribe";
@@ -58,6 +58,17 @@ export async function POST(request: Request) {
         send({ type: "status", message: "Checking that yt-dlp and ffmpeg are installed..." });
         await checkDependencies();
 
+        let burnCaptions = options.burnCaptions;
+        if (burnCaptions && !(await supportsBurnedCaptions())) {
+          send({
+            type: "status",
+            message:
+              "This ffmpeg build has no subtitle support (libass) - generating clips without burned-in " +
+              "captions. Reinstall ffmpeg (e.g. `brew reinstall ffmpeg` on macOS) to enable captions.",
+          });
+          burnCaptions = false;
+        }
+
         await fs.mkdir(workDir, { recursive: true });
 
         send({ type: "status", message: "Fetching video info..." });
@@ -103,7 +114,7 @@ export async function POST(request: Request) {
 
         // Caption font/margins are sized relative to this canvas - vertical mode always
         // renders at a fixed 1080x1920, otherwise clips keep the source video's own size.
-        const captionCanvas = options.burnCaptions
+        const captionCanvas = burnCaptions
           ? options.vertical
             ? { width: 1080, height: 1920 }
             : await getVideoDimensions(videoPath)

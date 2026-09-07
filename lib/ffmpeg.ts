@@ -37,6 +37,16 @@ export async function getMediaDuration(mediaPath: string): Promise<number> {
   return duration;
 }
 
+/** Whether this ffmpeg build has libass support (required for the `ass` filter used to burn in captions). */
+export async function supportsBurnedCaptions(): Promise<boolean> {
+  try {
+    const stdout = await run("ffmpeg", ["-filters"]);
+    return /\bass\s+V->V/.test(stdout);
+  } catch {
+    return false;
+  }
+}
+
 export async function getVideoDimensions(videoPath: string): Promise<{ width: number; height: number }> {
   const stdout = await run("ffprobe", [
     "-v",
