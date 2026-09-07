@@ -37,6 +37,25 @@ export async function getMediaDuration(mediaPath: string): Promise<number> {
   return duration;
 }
 
+export async function getVideoDimensions(videoPath: string): Promise<{ width: number; height: number }> {
+  const stdout = await run("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=width,height",
+    "-of",
+    "csv=s=x:p=0",
+    videoPath,
+  ]);
+  const [width, height] = stdout.trim().split("x").map(Number);
+  if (!width || !height) {
+    throw new Error(`Could not determine dimensions of ${videoPath}`);
+  }
+  return { width, height };
+}
+
 export interface AudioChunk {
   path: string;
   offsetSeconds: number;
@@ -73,21 +92,49 @@ export async function splitAudioIntoChunks(
   }));
 }
 
+export interface CutClipOptions {
+  /** Reformat to 9:16 (1080x1920) with a blurred, filled background - good for Shorts/Reels/TikTok. */
+  vertical?: boolean;
+  /** Path to an .ass caption file (see lib/subtitles.ts) to burn in as open captions. */
+  subtitlesPath?: string;
+}
+
 export async function cutClip(
   videoPath: string,
   outputPath: string,
   startSeconds: number,
   endSeconds: number,
+  options: CutClipOptions = {},
 ): Promise<void> {
   const duration = Math.max(0.5, endSeconds - startSeconds);
-  await run("ffmpeg", [
-    "-y",
-    "-ss",
-    String(Math.max(0, startSeconds)),
-    "-i",
-    videoPath,
-    "-t",
-    String(duration),
+  const args = ["-y", "-ss", String(Math.max(0, startSeconds)), "-i", videoPath, "-t", String(duration)];
+
+  const filters: string[] = [];
+  let videoLabel: string | null = null;
+
+  if (options.vertical) {
+    filters.push(
+      "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=20[bg]",
+      "[0:v]scale=1080:-2[fg]",
+      "[bg][fg]overlay=(W-w)/2:(H-h)/2[vertical]",
+    );
+    videoLabel = "vertical";
+  }
+
+  if (options.subtitlesPath) {
+    // Use the `ass` filter (not `subtitles`) - the caption file already carries its own
+    // PlayResX/PlayResY and style block (see lib/subtitles.ts), so no force_style/sizing
+    // guesswork is needed here and nothing can silently mis-scale on a tall vertical frame.
+    const source = videoLabel ? `[${videoLabel}]` : "[0:v]";
+    filters.push(`${source}ass=${escapeForFilterGraph(options.subtitlesPath)}[captioned]`);
+    videoLabel = "captioned";
+  }
+
+  if (filters.length > 0) {
+    args.push("-filter_complex", filters.join(";"), "-map", `[${videoLabel}]`, "-map", "0:a?");
+  }
+
+  args.push(
     "-c:v",
     "libx264",
     "-preset",
@@ -99,5 +146,12 @@ export async function cutClip(
     "-movflags",
     "+faststart",
     outputPath,
-  ]);
+  );
+
+  await run("ffmpeg", args);
+}
+
+/** Escapes a path for safe use as an ffmpeg filtergraph argument (e.g. subtitles=<path>). */
+function escapeForFilterGraph(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
 }

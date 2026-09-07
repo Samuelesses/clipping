@@ -2,8 +2,9 @@ import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import { fetchCaptions } from "@/lib/captions";
-import { cutClip, extractAudio } from "@/lib/ffmpeg";
+import { cutClip, extractAudio, getVideoDimensions } from "@/lib/ffmpeg";
 import { findHighlights } from "@/lib/highlights";
+import { writeClipAss } from "@/lib/subtitles";
 import { transcribeAudio } from "@/lib/transcribe";
 import type { GeneratedClip, ProcessEvent, ProcessOptions, TranscriptSegment } from "@/lib/types";
 import { checkDependencies, downloadVideo, getVideoInfo } from "@/lib/ytdlp";
@@ -38,6 +39,8 @@ export async function POST(request: Request) {
     clipCount: clamp(Number(body.clipCount) || 5, 1, 15),
     minClipSeconds: clamp(Number(body.minClipSeconds) || 20, 5, 600),
     maxClipSeconds: clamp(Number(body.maxClipSeconds) || 90, 5, 600),
+    vertical: body.vertical !== false,
+    burnCaptions: body.burnCaptions !== false,
   };
 
   const encoder = new TextEncoder();
@@ -98,14 +101,39 @@ export async function POST(request: Request) {
         const clipsDir = path.join(PUBLIC_CLIPS_DIR, jobId);
         await fs.mkdir(clipsDir, { recursive: true });
 
+        // Caption font/margins are sized relative to this canvas - vertical mode always
+        // renders at a fixed 1080x1920, otherwise clips keep the source video's own size.
+        const captionCanvas = options.burnCaptions
+          ? options.vertical
+            ? { width: 1080, height: 1920 }
+            : await getVideoDimensions(videoPath)
+          : null;
+
         const clips: GeneratedClip[] = [];
         for (const [index, highlight] of highlights.entries()) {
           send({
             type: "status",
             message: `Cutting clip ${index + 1}/${highlights.length}: ${highlight.title}`,
           });
+
+          let subtitlesPath: string | undefined;
+          if (captionCanvas) {
+            subtitlesPath = path.join(workDir, `clip-${index + 1}.ass`);
+            await writeClipAss(
+              segments,
+              highlight.start,
+              highlight.end,
+              captionCanvas.width,
+              captionCanvas.height,
+              subtitlesPath,
+            );
+          }
+
           const fileName = `clip-${index + 1}.mp4`;
-          await cutClip(videoPath, path.join(clipsDir, fileName), highlight.start, highlight.end);
+          await cutClip(videoPath, path.join(clipsDir, fileName), highlight.start, highlight.end, {
+            vertical: options.vertical,
+            subtitlesPath,
+          });
           const clip: GeneratedClip = { ...highlight, url: `/clips/${jobId}/${fileName}` };
           clips.push(clip);
           send({ type: "clip", clip });

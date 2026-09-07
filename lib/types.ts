@@ -25,6 +25,8 @@ export interface ProcessOptions {
   clipCount: number;
   minClipSeconds: number;
   maxClipSeconds: number;
+  vertical: boolean;
+  burnCaptions: boolean;
 }
 
 export type ProcessEvent =

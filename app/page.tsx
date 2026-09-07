@@ -10,6 +10,8 @@ export default function Home() {
   const [clipCount, setClipCount] = useState(5);
   const [minClipSeconds, setMinClipSeconds] = useState(20);
   const [maxClipSeconds, setMaxClipSeconds] = useState(90);
+  const [vertical, setVertical] = useState(true);
+  const [burnCaptions, setBurnCaptions] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [status, setStatus] = useState<Status>("idle");
@@ -34,7 +36,7 @@ export default function Home() {
       const response = await fetch("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, clipCount, minClipSeconds, maxClipSeconds }),
+        body: JSON.stringify({ url, clipCount, minClipSeconds, maxClipSeconds, vertical, burnCaptions }),
         signal: controller.signal,
       });
 
@@ -86,8 +88,8 @@ export default function Home() {
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Clipping</h1>
         <p className="text-neutral-400">
-          Paste a YouTube video or Twitch VOD link. It downloads locally, transcribes it, and asks
-          Claude to pick the best moments to turn into short clips.
+          Paste a YouTube video or Twitch VOD link. It downloads locally, gets a transcript, and asks
+          AI to pick the best moments, cut into vertical clips with captions ready to post.
         </p>
       </header>
 
@@ -117,10 +119,20 @@ export default function Home() {
         </button>
 
         {showAdvanced && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <NumberField label="Number of clips" value={clipCount} onChange={setClipCount} min={1} max={15} />
-            <NumberField label="Min clip length (s)" value={minClipSeconds} onChange={setMinClipSeconds} min={5} max={600} />
-            <NumberField label="Max clip length (s)" value={maxClipSeconds} onChange={setMaxClipSeconds} min={5} max={600} />
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <NumberField label="Number of clips" value={clipCount} onChange={setClipCount} min={1} max={15} />
+              <NumberField label="Min clip length (s)" value={minClipSeconds} onChange={setMinClipSeconds} min={5} max={600} />
+              <NumberField label="Max clip length (s)" value={maxClipSeconds} onChange={setMaxClipSeconds} min={5} max={600} />
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
+              <CheckboxField
+                label="Vertical 9:16 (for phone/Shorts/Reels)"
+                checked={vertical}
+                onChange={setVertical}
+              />
+              <CheckboxField label="Burn in captions" checked={burnCaptions} onChange={setBurnCaptions} />
+            </div>
           </div>
         )}
 
@@ -156,7 +168,12 @@ export default function Home() {
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
             {clips.map((clip, i) => (
               <div key={i} className="space-y-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-4">
-                <video controls preload="metadata" src={clip.url} className="w-full rounded-lg bg-black" />
+                <video
+                  controls
+                  preload="metadata"
+                  src={clip.url}
+                  className="mx-auto max-h-[70vh] w-auto max-w-full rounded-lg bg-black"
+                />
                 <h3 className="font-medium">{clip.title}</h3>
                 <p className="text-sm text-neutral-400">{clip.reason}</p>
                 <a href={clip.url} download className="inline-block text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
@@ -168,6 +185,28 @@ export default function Home() {
         </section>
       )}
     </main>
+  );
+}
+
+function CheckboxField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-neutral-300">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 rounded border-neutral-700 bg-neutral-950 accent-white"
+      />
+      {label}
+    </label>
   );
 }
 

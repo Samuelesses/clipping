@@ -55,7 +55,9 @@ export async function findHighlights(
           "Prioritize whatever is most likely to get clicks and reactions, even if it's blunt, opinionated, " +
           "or dramatic - don't soften or filter out controversial moments, just report them faithfully. " +
           "Each clip must make sense without any extra context and should isolate a single moment rather " +
-          "than spanning several unrelated topics.",
+          "than spanning several unrelated topics. Choose start/end times that land on natural speech " +
+          "boundaries - start right as a sentence/thought begins (never mid-sentence or mid-word) and end " +
+          "right after a sentence/thought completes, so the clip doesn't feel cut off.",
       },
       {
         role: "user",
@@ -79,9 +81,47 @@ export async function findHighlights(
 
   return parsed.clips
     .filter((clip) => clip.end > clip.start)
-    .map((clip) => ({
-      ...clip,
-      start: Math.max(0, clip.start),
-      end: Math.min(info.duration, clip.end),
-    }));
+    .map((clip) => {
+      const start = Math.max(0, clip.start);
+      const end = Math.min(info.duration, clip.end);
+      return {
+        ...clip,
+        start: Math.max(0, snapStart(start, segments)),
+        end: Math.min(info.duration, snapEnd(end, segments)),
+      };
+    });
+}
+
+// The model is good at picking *roughly* the right moment but imprecise down to the
+// second, which can cut a clip off mid-word. Snap to the nearest transcript segment
+// boundary within a small tolerance so cuts land on actual pauses in speech - this can
+// only widen a clip (never shrink it), and only by a bounded amount.
+const SNAP_TOLERANCE_SECONDS = 3;
+
+function snapStart(start: number, segments: TranscriptSegment[]): number {
+  let snapped = start;
+  let bestDelta = SNAP_TOLERANCE_SECONDS;
+  for (const segment of segments) {
+    if (segment.start > start) continue;
+    const delta = start - segment.start;
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      snapped = segment.start;
+    }
+  }
+  return snapped;
+}
+
+function snapEnd(end: number, segments: TranscriptSegment[]): number {
+  let snapped = end;
+  let bestDelta = SNAP_TOLERANCE_SECONDS;
+  for (const segment of segments) {
+    if (segment.end < end) continue;
+    const delta = segment.end - end;
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      snapped = segment.end;
+    }
+  }
+  return snapped;
 }
