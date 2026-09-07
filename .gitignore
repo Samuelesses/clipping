@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+dist/
+
+# local secrets
+.env
+.env.local
+.env*.local
+
+# generated media (raw downloads + working files)
+data/
+
+# generated clips served from /public
+public/clips/
+
+# misc
+.DS_Store
+*.log
+*.tsbuildinfo
