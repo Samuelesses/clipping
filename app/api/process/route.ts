@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     url: body.url,
     clipCount: clamp(Number(body.clipCount) || 5, 1, 15),
     minClipSeconds: clamp(Number(body.minClipSeconds) || 20, 5, 600),
-    maxClipSeconds: clamp(Number(body.maxClipSeconds) || 90, 5, 600),
+    maxClipSeconds: clamp(Number(body.maxClipSeconds) || 120, 5, 600),
     vertical: body.vertical !== false,
     burnCaptions: body.burnCaptions !== false,
   };
@@ -136,6 +136,7 @@ export async function POST(request: Request) {
               highlight.end,
               captionCanvas.width,
               captionCanvas.height,
+              highlight.title,
               subtitlesPath,
             );
           }

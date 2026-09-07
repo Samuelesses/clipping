@@ -9,7 +9,7 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [clipCount, setClipCount] = useState(5);
   const [minClipSeconds, setMinClipSeconds] = useState(20);
-  const [maxClipSeconds, setMaxClipSeconds] = useState(90);
+  const [maxClipSeconds, setMaxClipSeconds] = useState(120);
   const [vertical, setVertical] = useState(true);
   const [burnCaptions, setBurnCaptions] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -131,7 +131,7 @@ export default function Home() {
                 checked={vertical}
                 onChange={setVertical}
               />
-              <CheckboxField label="Burn in captions" checked={burnCaptions} onChange={setBurnCaptions} />
+              <CheckboxField label="Burn in title & captions" checked={burnCaptions} onChange={setBurnCaptions} />
             </div>
           </div>
         )}

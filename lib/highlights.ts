@@ -37,6 +37,10 @@ export async function findHighlights(
     .map((s) => `[${formatTime(s.start)} - ${formatTime(s.end)}] ${s.text}`)
     .join("\n");
 
+  // Ask for a few extra candidates - overlap dedup below can drop some, and this keeps
+  // the final count close to what was actually requested.
+  const requestCount = Math.min(options.clipCount + 3, 20);
+
   const completion = await client.chat.completions.parse({
     model,
     messages: [
@@ -57,7 +61,15 @@ export async function findHighlights(
           "Each clip must make sense without any extra context and should isolate a single moment rather " +
           "than spanning several unrelated topics. Choose start/end times that land on natural speech " +
           "boundaries - start right as a sentence/thought begins (never mid-sentence or mid-word) and end " +
-          "right after a sentence/thought completes, so the clip doesn't feel cut off.",
+          "right after a sentence/thought completes, so the clip doesn't feel cut off. Clip length is a " +
+          "guideline, not a hard rule: let the moment dictate the length - include the full setup and " +
+          "payoff of a joke or story even if that runs longer than the target, and don't pad out or " +
+          "extend a clip just to hit a minimum. A complete, satisfying moment matters more than an exact " +
+          "duration. Scan the ENTIRE transcript from start to finish and pick clips spread across " +
+          "different moments/timestamps - never pick two clips covering the same or overlapping moment, " +
+          "and don't cluster every pick in one section unless the rest of the video genuinely has nothing " +
+          "else worth clipping. Aim for variety across the categories above rather than several of the " +
+          "same type back to back.",
       },
       {
         role: "user",
@@ -65,8 +77,10 @@ export async function findHighlights(
           `Video title: ${info.title}\n` +
           `Video duration: ${formatTime(info.duration)} (${Math.round(info.duration)} seconds)\n\n` +
           `Transcript with timestamps:\n${transcript}\n\n` +
-          `Pick the ${options.clipCount} best, most engaging, self-contained moments to turn into clips. ` +
-          `Each clip must be between ${options.minClipSeconds} and ${options.maxClipSeconds} seconds long. ` +
+          `Pick ${requestCount} of the best, most engaging, self-contained moments to turn into clips, ` +
+          `drawn from different parts of the video. Aim for roughly ${options.minClipSeconds}-` +
+          `${options.maxClipSeconds} seconds each as a target, but go shorter or longer when the moment ` +
+          `itself calls for it - never cut off a setup or payoff early just to fit the target. ` +
           `Start and end times must be given in seconds, fall within [0, ${Math.round(info.duration)}], and ` +
           `clips must not overlap each other. Order the clips from best to worst.`,
       },
@@ -79,7 +93,7 @@ export async function findHighlights(
     throw new Error("The model did not return a parseable list of clips - try again.");
   }
 
-  return parsed.clips
+  const clips = parsed.clips
     .filter((clip) => clip.end > clip.start)
     .map((clip) => {
       const start = Math.max(0, clip.start);
@@ -90,6 +104,30 @@ export async function findHighlights(
         end: Math.min(info.duration, snapEnd(end, segments)),
       };
     });
+
+  return dedupeOverlapping(clips).slice(0, options.clipCount);
+}
+
+// Snapping to segment boundaries (above) can turn clips that were merely close into
+// clips that now genuinely overlap. The model is also not perfectly reliable about
+// "don't overlap" on its own. Belt and suspenders: drop any clip that overlaps an
+// already-accepted, higher-ranked clip (the model orders best-to-worst) by more than
+// a third of its own length, rather than shipping near-duplicate clips of one moment.
+const MAX_OVERLAP_FRACTION = 1 / 3;
+
+function dedupeOverlapping(clips: HighlightClip[]): HighlightClip[] {
+  const accepted: HighlightClip[] = [];
+  for (const clip of clips) {
+    const clipLength = clip.end - clip.start;
+    const overlapsExisting = accepted.some((existing) => {
+      const overlap = Math.min(clip.end, existing.end) - Math.max(clip.start, existing.start);
+      return overlap > clipLength * MAX_OVERLAP_FRACTION;
+    });
+    if (!overlapsExisting) {
+      accepted.push(clip);
+    }
+  }
+  return accepted;
 }
 
 // The model is good at picking *roughly* the right moment but imprecise down to the
