@@ -45,8 +45,17 @@ export async function findHighlights(
         content:
           "You are an expert short-form video editor. You read transcripts of long-form videos and streams " +
           "and find the moments most likely to work as standalone short clips (e.g. YouTube Shorts, TikTok, " +
-          "Twitter clips): a clear hook, a punchline, an emotional peak, a funny exchange, or a self-contained " +
-          "story or take. Clips must make sense without any extra context.",
+          "Twitter clips) - the kind that get shared and go viral. Look for a mix of: \n" +
+          "- Funny moments: jokes, punchlines, bits, funny exchanges or reactions\n" +
+          "- Highlights: exciting plays, big wins, surprising twists, standout skill\n" +
+          "- Emotional peaks: genuine excitement, frustration, shock, or a strong reaction\n" +
+          "- Hot takes and drama: a strong opinion, a callout, trash talk, beef with another " +
+          "creator, or the streamer saying something blunt/controversial about a person, game, or event\n" +
+          "- Self-contained stories: a short anecdote or take that stands on its own\n" +
+          "Prioritize whatever is most likely to get clicks and reactions, even if it's blunt, opinionated, " +
+          "or dramatic - don't soften or filter out controversial moments, just report them faithfully. " +
+          "Each clip must make sense without any extra context and should isolate a single moment rather " +
+          "than spanning several unrelated topics.",
       },
       {
         role: "user",
