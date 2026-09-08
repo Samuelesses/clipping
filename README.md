@@ -26,6 +26,10 @@ transcription when needed).
    the original aspect ratio or skip the burned-in text. The social caption + hashtags are shown
    under each clip with a copy button - not burned into the video.
 
+Clips can be browsed as a grid (with inline previews) or a compact list, and downloaded one at a
+time or all together as a single ZIP - handy since TikTok's uploader lets you select up to 30
+videos at once from a folder.
+
 Everything runs locally as a single Next.js app (UI + API routes) - there's no server to
 deploy, no database, and no accounts. Only one API key is needed (OpenAI).
 

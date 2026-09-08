@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { GeneratedClip, ProcessEvent } from "@/lib/types";
 
 type Status = "idle" | "running" | "done" | "error";
+type ViewMode = "grid" | "list";
 
 export default function Home() {
   const [url, setUrl] = useState("");
@@ -17,6 +18,8 @@ export default function Home() {
   const [status, setStatus] = useState<Status>("idle");
   const [log, setLog] = useState<string[]>([]);
   const [clips, setClips] = useState<GeneratedClip[]>([]);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -27,6 +30,7 @@ export default function Home() {
     setStatus("running");
     setLog([]);
     setClips([]);
+    setJobId(null);
     setErrorMessage(null);
 
     const controller = new AbortController();
@@ -77,6 +81,7 @@ export default function Home() {
       setClips((prev) => [...prev, event.clip]);
     } else if (event.type === "done") {
       setStatus("done");
+      setJobId(event.jobId);
     } else if (event.type === "error") {
       setStatus("error");
       setErrorMessage(event.message);
@@ -164,28 +169,115 @@ export default function Home() {
 
       {clips.length > 0 && (
         <section className="space-y-4">
-          <h2 className="text-lg font-medium">Clips</h2>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            {clips.map((clip, i) => (
-              <div key={i} className="space-y-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-4">
-                <video
-                  controls
-                  preload="metadata"
-                  src={clip.url}
-                  className="mx-auto max-h-[70vh] w-auto max-w-full rounded-lg bg-black"
-                />
-                <h3 className="font-medium">{clip.title}</h3>
-                <p className="text-sm text-neutral-400">{clip.reason}</p>
-                <a href={clip.url} download className="inline-block text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
-                  Download
-                </a>
-                <CaptionBox text={clip.socialCaption} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-medium">Clips ({clips.length})</h2>
+            <div className="flex items-center gap-3">
+              <div className="flex rounded-lg border border-neutral-700 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("grid")}
+                  className={`rounded-md px-3 py-1 text-sm ${viewMode === "grid" ? "bg-neutral-100 text-black" : "text-neutral-400"}`}
+                >
+                  Grid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={`rounded-md px-3 py-1 text-sm ${viewMode === "list" ? "bg-neutral-100 text-black" : "text-neutral-400"}`}
+                >
+                  List
+                </button>
               </div>
-            ))}
+              {jobId && (
+                <a
+                  href={`/api/clips/${jobId}/download`}
+                  className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-black hover:bg-white"
+                >
+                  Download all as ZIP
+                </a>
+              )}
+            </div>
           </div>
+
+          {jobId && (
+            <p className="text-xs text-neutral-500">
+              TikTok lets you bulk-upload up to 30 videos at once - unzip and select them all in the
+              upload picker.
+            </p>
+          )}
+
+          {viewMode === "grid" ? (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              {clips.map((clip, i) => (
+                <div key={i} className="space-y-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-4">
+                  <video
+                    controls
+                    preload="metadata"
+                    src={clip.url}
+                    className="mx-auto max-h-[70vh] w-auto max-w-full rounded-lg bg-black"
+                  />
+                  <h3 className="font-medium">{clip.title}</h3>
+                  <p className="text-sm text-neutral-400">{clip.reason}</p>
+                  <a href={clip.url} download className="inline-block text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
+                    Download
+                  </a>
+                  <CaptionBox text={clip.socialCaption} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {clips.map((clip, i) => (
+                <ClipRow key={i} clip={clip} />
+              ))}
+            </div>
+          )}
         </section>
       )}
     </main>
+  );
+}
+
+function ClipRow({ clip }: { clip: GeneratedClip }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-3">
+      <div className="flex items-center gap-4">
+        <video
+          preload="metadata"
+          src={clip.url}
+          muted
+          className="h-24 w-auto flex-shrink-0 rounded-md bg-black"
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate font-medium">{clip.title}</h3>
+          <p className="truncate text-sm text-neutral-400">{clip.reason}</p>
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+          >
+            {expanded ? "Hide" : "Details"}
+          </button>
+          <a
+            href={clip.url}
+            download
+            className="text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300"
+          >
+            Download
+          </a>
+        </div>
+      </div>
+      {expanded && (
+        <div className="mt-3 space-y-3 border-t border-neutral-800 pt-3">
+          <video controls preload="metadata" src={clip.url} className="mx-auto max-h-[60vh] w-auto max-w-full rounded-lg bg-black" />
+          <CaptionBox text={clip.socialCaption} />
+        </div>
+      )}
+    </div>
   );
 }
 
