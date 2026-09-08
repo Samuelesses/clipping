@@ -42,7 +42,7 @@ export async function fetchCaptions(url: string, workDir: string): Promise<Trans
 const TIME_RE =
   /(\d{2}:)?\d{2}:\d{2}\.\d{3}\s*-->\s*(\d{2}:)?\d{2}:\d{2}\.\d{3}/;
 
-function parseVtt(content: string): TranscriptSegment[] {
+export function parseVtt(content: string): TranscriptSegment[] {
   const lines = content.split(/\r?\n/);
   const rawCues: { start: number; end: number; text: string }[] = [];
 
@@ -95,14 +95,28 @@ function wordOverlap(prev: string[], curr: string[]): number {
 }
 
 function cleanCueText(line: string): string {
-  return line
-    .replace(/<[^>]+>/g, "") // inline timing/style tags in auto-subs, e.g. <00:00:01.240><c>
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .trim();
+  return decodeHtmlEntities(
+    line.replace(/<[^>]+>/g, ""), // inline timing/style tags in auto-subs, e.g. <00:00:01.240><c>
+  ).trim();
 }
 
-function parseVttTime(value: string): number {
+// WebVTT cues are HTML-escaped, so things like speaker-change markers show up as
+// literal "&gt;&gt;" instead of ">>" unless unescaped. &amp; is decoded last so an
+// already-escaped "&amp;gt;" (a literal "&gt;" in the original text) doesn't get
+// double-unescaped into ">".
+export function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&amp;/g, "&");
+}
+
+export function parseVttTime(value: string): number {
   const parts = value.split(":").map(Number);
   if (parts.length === 3) {
     const [h, m, s] = parts;

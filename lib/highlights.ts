@@ -69,10 +69,11 @@ export async function findHighlights(
           "than spanning several unrelated topics. Choose start/end times that land on natural speech " +
           "boundaries - start right as a sentence/thought begins (never mid-sentence or mid-word) and end " +
           "right after a sentence/thought completes, so the clip doesn't feel cut off. Clip length is a " +
-          "guideline, not a hard rule: let the moment dictate the length - include the full setup and " +
-          "payoff of a joke or story even if that runs longer than the target, and don't pad out or " +
-          "extend a clip just to hit a minimum. A complete, satisfying moment matters more than an exact " +
-          "duration. Scan the ENTIRE transcript from start to finish and pick clips spread across " +
+          "target, not a hard limit: it's fine to run somewhat longer to include the full setup and " +
+          "payoff of a joke or story, and fine to come in shorter for a moment that's naturally brief - " +
+          "but never more than 50% over the requested maximum, and don't pad out or extend a clip just " +
+          "to hit a minimum. A complete, satisfying moment within that range matters more than hitting " +
+          "an exact duration. Scan the ENTIRE transcript from start to finish and pick clips spread across " +
           "different moments/timestamps - never pick two clips covering the same or overlapping moment, " +
           "and don't cluster every pick in one section unless the rest of the video genuinely has nothing " +
           "else worth clipping. Aim for variety across the categories above rather than several of the " +
@@ -111,9 +112,31 @@ export async function findHighlights(
         start: Math.max(0, snapStart(start, segments)),
         end: Math.min(info.duration, snapEnd(end, segments)),
       };
-    });
+    })
+    .map((clip) => capDuration(clip, segments, options.maxClipSeconds));
 
   return dedupeOverlapping(clips).slice(0, options.clipCount);
+}
+
+// The prompt asks the model to stay within ~50% of the requested max, but models don't
+// always follow numeric limits reliably - enforce it in code too so "max length" is a
+// real ceiling, not just a suggestion. Trims the end back to the nearest transcript
+// segment boundary at or before the cap so the clip still ends cleanly, rather than a
+// hard mid-sentence cut.
+export function capDuration(clip: HighlightClip, segments: TranscriptSegment[], maxClipSeconds: number): HighlightClip {
+  const hardCapSeconds = maxClipSeconds * 1.5;
+  if (clip.end - clip.start <= hardCapSeconds) return clip;
+
+  const cappedEnd = clip.start + hardCapSeconds;
+  let newEnd = clip.start;
+  for (const segment of segments) {
+    if (segment.end > clip.start && segment.end <= cappedEnd) {
+      newEnd = Math.max(newEnd, segment.end);
+    }
+  }
+  if (newEnd <= clip.start) newEnd = cappedEnd;
+
+  return { ...clip, end: newEnd };
 }
 
 // Snapping to segment boundaries (above) can turn clips that were merely close into
