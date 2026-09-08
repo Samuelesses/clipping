@@ -28,10 +28,12 @@ export interface ProcessOptions {
   maxClipSeconds: number;
   vertical: boolean;
   burnCaptions: boolean;
+  autoPostToTikTok: boolean;
 }
 
 export type ProcessEvent =
   | { type: "status"; message: string }
   | { type: "clip"; clip: GeneratedClip }
+  | { type: "tiktok"; clipIndex: number; status: "posting" | "posted" | "error"; message: string }
   | { type: "done"; jobId: string; title: string; clips: GeneratedClip[] }
   | { type: "error"; message: string };
