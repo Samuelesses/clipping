@@ -10,6 +10,13 @@ const ClipSchema = z.object({
   start: z.number(),
   end: z.number(),
   reason: z.string(),
+  socialCaption: z
+    .string()
+    .describe(
+      "A ready-to-post caption for TikTok/Instagram Reels/YouTube Shorts: 1-2 punchy sentences about " +
+        "this specific clip, then a line of 3-6 relevant hashtags (topic, game/category, and creator name " +
+        "if known). Plain text only, no markdown - it should be copy-pasteable directly into a post.",
+    ),
 });
 
 const HighlightsSchema = z.object({
@@ -82,7 +89,8 @@ export async function findHighlights(
           `${options.maxClipSeconds} seconds each as a target, but go shorter or longer when the moment ` +
           `itself calls for it - never cut off a setup or payoff early just to fit the target. ` +
           `Start and end times must be given in seconds, fall within [0, ${Math.round(info.duration)}], and ` +
-          `clips must not overlap each other. Order the clips from best to worst.`,
+          `clips must not overlap each other. For each clip also write a ready-to-post social caption with ` +
+          `hashtags (see schema). Order the clips from best to worst.`,
       },
     ],
     response_format: zodResponseFormat(HighlightsSchema, "highlights"),

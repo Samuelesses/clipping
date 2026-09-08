@@ -179,12 +179,46 @@ export default function Home() {
                 <a href={clip.url} download className="inline-block text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
                   Download
                 </a>
+                <CaptionBox text={clip.socialCaption} />
               </div>
             ))}
           </div>
         </section>
       )}
     </main>
+  );
+}
+
+function CaptionBox({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API can be unavailable (e.g. insecure context) - fail silently,
+      // the text is still selectable/copyable by hand from the box below.
+    }
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-lg border border-neutral-800 bg-neutral-950 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+          Caption &amp; hashtags
+        </span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="text-xs text-blue-400 underline underline-offset-2 hover:text-blue-300"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <p className="whitespace-pre-wrap text-sm text-neutral-300">{text}</p>
+    </div>
   );
 }
 

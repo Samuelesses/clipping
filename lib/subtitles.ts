@@ -2,6 +2,16 @@ import fs from "fs/promises";
 import type { TranscriptSegment } from "./types";
 
 const MAX_TITLE_LENGTH = 70;
+// Keep each burned caption card short - long lines wrap to 3+ lines and can grow tall
+// enough to run off the top/bottom of the frame. Splitting into short bursts (closer to
+// how TikTok/Shorts captions are usually cut) keeps every card to at most 1-2 lines.
+const MAX_WORDS_PER_CAPTION = 7;
+
+interface Cue {
+  start: number;
+  end: number;
+  text: string;
+}
 
 /**
  * Writes an ASS (Advanced SubStation Alpha) caption file for a single clip: a bottom
@@ -22,20 +32,25 @@ export async function writeClipAss(
   title: string,
   outPath: string,
 ): Promise<void> {
-  const cues = segments
+  const cues: Cue[] = segments
     .filter((s) => s.end > clipStart && s.start < clipEnd)
     .map((s) => ({
       start: Math.max(0, s.start - clipStart),
       end: Math.min(clipEnd - clipStart, s.end - clipStart),
       text: sanitizeAssText(s.text.trim()),
     }))
-    .filter((cue) => cue.end > cue.start && cue.text.length > 0);
+    .filter((cue) => cue.end > cue.start && cue.text.length > 0)
+    .flatMap(splitLongCue);
 
   const captionFontSize = Math.round(canvasHeight * 0.033);
   const captionMarginV = Math.round(canvasHeight * 0.09);
-  const titleFontSize = Math.round(canvasHeight * 0.026);
-  const titleMarginV = Math.round(canvasHeight * 0.045);
+  const titleFontSize = Math.round(canvasHeight * 0.05);
+  const titleMarginV = Math.round(canvasHeight * 0.075);
   const sideMargin = Math.round(canvasWidth * 0.05);
+
+  // Bright gold, black outline - the classic high-contrast "clip title" look (vs. the
+  // plain white/no-color caption track below it).
+  const titleColour = "&H0000D7FF";
 
   const header =
     "[Script Info]\n" +
@@ -43,7 +58,7 @@ export async function writeClipAss(
     `PlayResX: ${canvasWidth}\n` +
     `PlayResY: ${canvasHeight}\n` +
     // Smart wrapping (evenly split, auto-wraps within MarginL/MarginR) - required so a
-    // longer title wraps safely onto a second line instead of overflowing off-screen.
+    // longer title or caption wraps safely instead of overflowing off-screen.
     "WrapStyle: 0\n" +
     "ScaledBorderAndShadow: yes\n\n" +
     "[V4+ Styles]\n" +
@@ -52,8 +67,8 @@ export async function writeClipAss(
     "Alignment, MarginL, MarginR, MarginV, Encoding\n" +
     `Style: Caption,Arial,${captionFontSize},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,` +
     `0,0,1,3,0,2,${sideMargin},${sideMargin},${captionMarginV},1\n` +
-    `Style: Title,Arial,${titleFontSize},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,` +
-    `1,3,0,8,${sideMargin},${sideMargin},${titleMarginV},1\n\n` +
+    `Style: Title,Arial Black,${titleFontSize},${titleColour},&H000000FF,&H00000000,&H00000000,1,0,0,0,` +
+    `100,100,0,0,1,4,0,8,${sideMargin},${sideMargin},${titleMarginV},1\n\n` +
     "[Events]\n" +
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
 
@@ -64,6 +79,23 @@ export async function writeClipAss(
     .join("");
 
   await fs.writeFile(outPath, header + titleLine + captionLines, "utf8");
+}
+
+function splitLongCue(cue: Cue): Cue[] {
+  const words = cue.text.split(/\s+/).filter(Boolean);
+  if (words.length <= MAX_WORDS_PER_CAPTION) return [cue];
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < words.length; i += MAX_WORDS_PER_CAPTION) {
+    chunks.push(words.slice(i, i + MAX_WORDS_PER_CAPTION));
+  }
+
+  const duration = cue.end - cue.start;
+  return chunks.map((chunkWords, i) => ({
+    start: cue.start + (duration * i) / chunks.length,
+    end: cue.start + (duration * (i + 1)) / chunks.length,
+    text: chunkWords.join(" "),
+  }));
 }
 
 function truncateTitle(title: string): string {

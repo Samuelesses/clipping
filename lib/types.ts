@@ -14,6 +14,7 @@ export interface HighlightClip {
   start: number;
   end: number;
   reason: string;
+  socialCaption: string;
 }
 
 export interface GeneratedClip extends HighlightClip {

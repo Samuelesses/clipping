@@ -14,14 +14,17 @@ transcription when needed).
    `ffmpeg` extracting audio and sending it to OpenAI's Whisper API for a timestamped transcript,
    automatically chunked to stay under the API's 25MB upload limit.
 3. **Find highlights** - the full transcript is sent to an OpenAI model, which returns a
-   structured list of clip-worthy moments (title, start/end time, and why it's worth clipping) -
-   funny moments, in-game highlights, emotional reactions, and hot takes/drama/callouts. Each
-   clip's start/end is then snapped to the nearest real transcript boundary so it doesn't get cut
-   off mid-sentence.
+   structured list of clip-worthy moments: a title, start/end time, why it's worth clipping,
+   and a ready-to-post social caption with hashtags - funny moments, in-game highlights,
+   emotional reactions, and hot takes/drama/callouts, spread across the whole video rather than
+   clustered in one place. Each clip's start/end is then snapped to the nearest real transcript
+   boundary so it doesn't get cut off mid-sentence, and overlapping/duplicate picks are dropped.
 4. **Cut clips** - `ffmpeg` cuts each highlight out of the downloaded video. By default clips are
-   reformatted to 9:16 vertical (blurred, filled background - like TikTok/Shorts/Reels) with
-   burned-in captions generated from the same transcript, ready to post as-is. Both are toggles
-   in "advanced options" if you'd rather keep the original aspect ratio or skip captions.
+   reformatted to 9:16 vertical (blurred, filled background - like TikTok/Shorts/Reels) with a
+   bold title burned in at the top and captions at the bottom, generated from the same
+   transcript, ready to post as-is. Both are toggles in "advanced options" if you'd rather keep
+   the original aspect ratio or skip the burned-in text. The social caption + hashtags are shown
+   under each clip with a copy button - not burned into the video.
 
 Everything runs locally as a single Next.js app (UI + API routes) - there's no server to
 deploy, no database, and no accounts. Only one API key is needed (OpenAI).
