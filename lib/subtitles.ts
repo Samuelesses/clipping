@@ -2,10 +2,10 @@ import fs from "fs/promises";
 import type { TranscriptSegment } from "./types";
 
 const MAX_TITLE_LENGTH = 70;
-// Keep each burned caption card short - long lines wrap to 3+ lines and can grow tall
-// enough to run off the top/bottom of the frame. Splitting into short bursts (closer to
-// how TikTok/Shorts captions are usually cut) keeps every card to at most 1-2 lines.
-const MAX_WORDS_PER_CAPTION = 7;
+// Keep each burned caption card short and punchy - long lines wrap to 3+ lines and can
+// grow tall enough to run off the top/bottom of the frame, and short bursts read faster
+// on short-form video anyway (closer to how TikTok/Shorts captions are usually cut).
+const MAX_WORDS_PER_CAPTION = 5;
 
 interface Cue {
   start: number;
@@ -42,15 +42,17 @@ export async function writeClipAss(
     .filter((cue) => cue.end > cue.start && cue.text.length > 0)
     .flatMap(splitLongCue);
 
-  const captionFontSize = Math.round(canvasHeight * 0.033);
-  const captionMarginV = Math.round(canvasHeight * 0.09);
-  const titleFontSize = Math.round(canvasHeight * 0.05);
+  const captionFontSize = Math.round(canvasHeight * 0.038);
+  const captionMarginV = Math.round(canvasHeight * 0.1);
+  const titleFontSize = Math.round(canvasHeight * 0.052);
   const titleMarginV = Math.round(canvasHeight * 0.075);
-  const sideMargin = Math.round(canvasWidth * 0.05);
+  const sideMargin = Math.round(canvasWidth * 0.06);
 
-  // Bright gold, black outline - the classic high-contrast "clip title" look (vs. the
-  // plain white/no-color caption track below it).
+  // Bright gold title (classic high-contrast "clip title" look), clean white captions -
+  // both rendered with bundled fonts (see fonts/README.md) so they look the same on
+  // every machine instead of falling back to whatever's installed locally.
   const titleColour = "&H0000D7FF";
+  const captionColour = "&H00FFFFFF";
 
   const header =
     "[Script Info]\n" +
@@ -65,10 +67,10 @@ export async function writeClipAss(
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, " +
     "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, " +
     "Alignment, MarginL, MarginR, MarginV, Encoding\n" +
-    `Style: Caption,Arial,${captionFontSize},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,` +
-    `0,0,1,3,0,2,${sideMargin},${sideMargin},${captionMarginV},1\n` +
-    `Style: Title,Arial Black,${titleFontSize},${titleColour},&H000000FF,&H00000000,&H00000000,1,0,0,0,` +
-    `100,100,0,0,1,4,0,8,${sideMargin},${sideMargin},${titleMarginV},1\n\n` +
+    `Style: Caption,Montserrat ExtraBold,${captionFontSize},${captionColour},&H000000FF,&H00000000,` +
+    `&H00000000,0,0,0,0,100,100,0,0,1,3.5,1.5,2,${sideMargin},${sideMargin},${captionMarginV},1\n` +
+    `Style: Title,Anton,${titleFontSize},${titleColour},&H000000FF,&H00000000,&H00000000,0,0,0,0,` +
+    `100,100,0,0,1,4.5,2,8,${sideMargin},${sideMargin},${titleMarginV},1\n\n` +
     "[Events]\n" +
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
 

@@ -2,6 +2,11 @@ import fs from "fs/promises";
 import path from "path";
 import { run } from "./exec";
 
+// Bundled fonts (see fonts/README.md) so burned-in text looks the same on every
+// machine, regardless of what's installed locally - see lib/subtitles.ts for the
+// style names ("Anton", "Montserrat ExtraBold") that reference these files.
+const FONTS_DIR = path.join(process.cwd(), "fonts");
+
 export async function extractAudio(videoPath: string, workDir: string): Promise<string> {
   const audioPath = path.join(workDir, "audio.mp3");
   await run("ffmpeg", [
@@ -138,7 +143,10 @@ export async function cutClip(
     // filename= must be named explicitly (not passed as a bare positional value) - newer
     // ffmpeg builds (9.x) reject "ass=/path/to/file" with "No option name near ...".
     const source = videoLabel ? `[${videoLabel}]` : "[0:v]";
-    filters.push(`${source}ass=filename='${escapeForFilterGraph(options.subtitlesPath)}'[captioned]`);
+    filters.push(
+      `${source}ass=filename='${escapeForFilterGraph(options.subtitlesPath)}':` +
+        `fontsdir='${escapeForFilterGraph(FONTS_DIR)}'[captioned]`,
+    );
     videoLabel = "captioned";
   }
 
