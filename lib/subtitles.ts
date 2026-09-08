@@ -31,6 +31,7 @@ export async function writeClipAss(
   canvasHeight: number,
   title: string,
   outPath: string,
+  videoBottomY: number | null = null,
 ): Promise<void> {
   const cues: Cue[] = segments
     .filter((s) => s.end > clipStart && s.start < clipEnd)
@@ -43,10 +44,22 @@ export async function writeClipAss(
     .flatMap(splitLongCue);
 
   const captionFontSize = Math.round(canvasHeight * 0.038);
-  const captionMarginV = Math.round(canvasHeight * 0.1);
-  const titleFontSize = Math.round(canvasHeight * 0.052);
-  const titleMarginV = Math.round(canvasHeight * 0.075);
+  const titleFontSize = Math.round(canvasHeight * 0.062);
+  const titleMarginV = Math.round(canvasHeight * 0.09);
   const sideMargin = Math.round(canvasWidth * 0.06);
+
+  // When we know where the actual video content ends (vertical mode, where the sharp
+  // foreground video sits centered over a blurred fill), anchor captions just under it
+  // instead of near the bottom of the whole canvas - otherwise they end up stranded
+  // deep in the blurred padding, disconnected from the video itself. Alignment 8
+  // (top-center) + MarginV-from-top does that: text starts right below the video and
+  // grows downward. Clamp so a near-full-height video (little/no padding) still leaves
+  // room for the text instead of pushing it off-screen.
+  const captionGap = Math.round(canvasHeight * 0.02);
+  const maxCaptionMarginV = canvasHeight - Math.round(captionFontSize * 2.6);
+  const captionAlignment = videoBottomY !== null ? 8 : 2;
+  const captionMarginV =
+    videoBottomY !== null ? Math.min(videoBottomY + captionGap, maxCaptionMarginV) : Math.round(canvasHeight * 0.1);
 
   // Bright gold title (classic high-contrast "clip title" look), clean white captions -
   // both rendered with bundled fonts (see fonts/README.md) so they look the same on
@@ -68,7 +81,7 @@ export async function writeClipAss(
     "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, " +
     "Alignment, MarginL, MarginR, MarginV, Encoding\n" +
     `Style: Caption,Montserrat ExtraBold,${captionFontSize},${captionColour},&H000000FF,&H00000000,` +
-    `&H00000000,0,0,0,0,100,100,0,0,1,3.5,1.5,2,${sideMargin},${sideMargin},${captionMarginV},1\n` +
+    `&H00000000,0,0,0,0,100,100,0,0,1,3.5,1.5,${captionAlignment},${sideMargin},${sideMargin},${captionMarginV},1\n` +
     `Style: Title,Anton,${titleFontSize},${titleColour},&H000000FF,&H00000000,&H00000000,0,0,0,0,` +
     `100,100,0,0,1,4.5,2,8,${sideMargin},${sideMargin},${titleMarginV},1\n\n` +
     "[Events]\n" +

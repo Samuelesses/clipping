@@ -2,13 +2,12 @@ import { ZipArchive } from "archiver";
 import fs from "fs/promises";
 import path from "path";
 import { Readable } from "stream";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isValidJobId } from "@/lib/jobId";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
 
-  if (!UUID_RE.test(jobId)) {
+  if (!isValidJobId(jobId)) {
     return new Response("Invalid job id.", { status: 400 });
   }
 

@@ -10,7 +10,7 @@ const MAX_UPLOAD_BYTES = 24 * 1024 * 1024;
 export async function transcribeAudio(
   audioPath: string,
   workDir: string,
-  onProgress?: (message: string) => void,
+  onProgress?: (message: string) => void | Promise<void>,
 ): Promise<TranscriptSegment[]> {
   const stat = await fsp.stat(audioPath);
 
@@ -25,7 +25,7 @@ export async function transcribeAudio(
   const chunks = await splitAudioIntoChunks(audioPath, workDir, chunkSeconds);
   const allSegments: TranscriptSegment[] = [];
   for (const [index, chunk] of chunks.entries()) {
-    onProgress?.(`Transcribing chunk ${index + 1}/${chunks.length}...`);
+    await onProgress?.(`Transcribing chunk ${index + 1}/${chunks.length}...`);
     const segments = await transcribeFile(chunk.path, chunk.offsetSeconds);
     allSegments.push(...segments);
   }

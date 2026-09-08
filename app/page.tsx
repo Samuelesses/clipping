@@ -1,10 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
-import type { GeneratedClip, ProcessEvent } from "@/lib/types";
+import { useEffect, useRef, useState } from "react";
+import type { GeneratedClip, ProjectState } from "@/lib/types";
 
-type Status = "idle" | "running" | "done" | "error";
 type ViewMode = "grid" | "list";
+
+const ACTIVE_JOB_KEY = "clipping.activeJobId";
+const POLL_INTERVAL_MS = 1500;
 
 export default function Home() {
   const [url, setUrl] = useState("");
@@ -14,79 +16,111 @@ export default function Home() {
   const [vertical, setVertical] = useState(true);
   const [burnCaptions, setBurnCaptions] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const [status, setStatus] = useState<Status>("idle");
-  const [log, setLog] = useState<string[]>([]);
-  const [clips, setClips] = useState<GeneratedClip[]>([]);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [project, setProject] = useState<ProjectState | null>(null);
+  const [projects, setProjects] = useState<ProjectState[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    refreshProjects();
+    const stored = window.localStorage.getItem(ACTIVE_JOB_KEY);
+    if (stored) setActiveJobId(stored);
+  }, []);
+
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (!activeJobId) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/projects/${activeJobId}`);
+        if (!res.ok) return; // transient failure - just try again next tick
+        const data: ProjectState = await res.json();
+        setProject(data);
+        if (data.status !== "running" && pollRef.current) {
+          clearInterval(pollRef.current);
+          refreshProjects();
+        }
+      } catch {
+        // Network blip - nothing lost, the server-side job keeps running regardless.
+      }
+    };
+
+    poll();
+    pollRef.current = setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [activeJobId]);
+
+  async function refreshProjects() {
+    try {
+      const res = await fetch("/api/projects");
+      const data = await res.json();
+      setProjects(data.projects ?? []);
+    } catch {
+      // Non-fatal - the list just won't refresh this time.
+    }
+  }
+
+  function selectJob(jobId: string) {
+    setSubmitError(null);
+    window.localStorage.setItem(ACTIVE_JOB_KEY, jobId);
+    setActiveJobId(jobId);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!url.trim() || status === "running") return;
+    if (!url.trim() || submitting) return;
 
-    setStatus("running");
-    setLog([]);
-    setClips([]);
-    setJobId(null);
-    setErrorMessage(null);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
+    setSubmitting(true);
+    setSubmitError(null);
 
     try {
       const response = await fetch("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, clipCount, minClipSeconds, maxClipSeconds, vertical, burnCaptions }),
-        signal: controller.signal,
       });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Request failed with status ${response.status}`);
 
-      if (!response.ok || !response.body) {
-        const text = await response.text().catch(() => "");
-        throw new Error(text || `Request failed with status ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, newlineIndex).trim();
-          buffer = buffer.slice(newlineIndex + 1);
-          if (!line) continue;
-          handleEvent(JSON.parse(line) as ProcessEvent);
-        }
-      }
+      setProject(null);
+      selectJob(data.jobId);
     } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        setStatus("error");
-        setErrorMessage(err instanceof Error ? err.message : "Something went wrong.");
-      }
+      setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  function handleEvent(event: ProcessEvent) {
-    if (event.type === "status") {
-      setLog((prev) => [...prev, event.message]);
-    } else if (event.type === "clip") {
-      setClips((prev) => [...prev, event.clip]);
-    } else if (event.type === "done") {
-      setStatus("done");
-      setJobId(event.jobId);
-    } else if (event.type === "error") {
-      setStatus("error");
-      setErrorMessage(event.message);
+  async function handleRetry(jobId: string) {
+    setSubmitError(null);
+    try {
+      const res = await fetch(`/api/projects/${jobId}/retry`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not retry this project.");
+      selectJob(jobId);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Could not retry this project.");
     }
   }
+
+  async function handleDelete(jobId: string) {
+    await fetch(`/api/projects/${jobId}`, { method: "DELETE" });
+    if (jobId === activeJobId) {
+      window.localStorage.removeItem(ACTIVE_JOB_KEY);
+      setActiveJobId(null);
+      setProject(null);
+    }
+    refreshProjects();
+  }
+
+  const clips: GeneratedClip[] = project?.clips ?? [];
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-16">
@@ -94,7 +128,8 @@ export default function Home() {
         <h1 className="text-3xl font-semibold tracking-tight">Clipping</h1>
         <p className="text-neutral-400">
           Paste a YouTube video or Twitch VOD link. It downloads locally, gets a transcript, and asks
-          AI to pick the best moments, cut into vertical clips with captions ready to post.
+          AI to pick the best moments, cut into vertical clips with captions ready to post. Progress is
+          saved as it goes, so a dropped connection never loses your place.
         </p>
       </header>
 
@@ -110,8 +145,7 @@ export default function Home() {
             placeholder="https://www.youtube.com/watch?v=... or https://www.twitch.tv/videos/..."
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            disabled={status === "running"}
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm outline-none focus:border-neutral-500 disabled:opacity-50"
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm outline-none focus:border-neutral-500"
           />
         </div>
 
@@ -143,28 +177,81 @@ export default function Home() {
 
         <button
           type="submit"
-          disabled={status === "running" || !url.trim()}
+          disabled={submitting || !url.trim()}
           className="w-full rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {status === "running" ? "Working..." : "Generate clips"}
+          {submitting ? "Starting..." : "Generate clips"}
         </button>
+
+        {submitError && <p className="text-sm text-red-400">{submitError}</p>}
       </form>
 
-      {log.length > 0 && (
-        <section className="space-y-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
-          <h2 className="text-sm font-medium text-neutral-300">Progress</h2>
-          <ul className="space-y-1 font-mono text-xs text-neutral-400">
-            {log.map((message, i) => (
-              <li key={i}>{message}</li>
+      {projects.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-neutral-300">Projects</h2>
+          <div className="space-y-2">
+            {projects.map((p) => (
+              <div
+                key={p.jobId}
+                className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-sm ${
+                  p.jobId === activeJobId ? "border-neutral-500 bg-neutral-900" : "border-neutral-800 bg-neutral-900/50"
+                }`}
+              >
+                <button type="button" onClick={() => selectJob(p.jobId)} className="min-w-0 flex-1 truncate text-left">
+                  <span className="font-medium">{p.title || p.url}</span>
+                  <span className="ml-2 text-neutral-500">
+                    {p.clips.length} clip{p.clips.length === 1 ? "" : "s"}
+                  </span>
+                </button>
+                <StatusBadge status={p.status} />
+                {p.status === "error" && (
+                  <button
+                    type="button"
+                    onClick={() => handleRetry(p.jobId)}
+                    className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+                  >
+                    Retry
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleDelete(p.jobId)}
+                  className="text-neutral-500 underline underline-offset-2 hover:text-red-400"
+                >
+                  Delete
+                </button>
+              </div>
             ))}
-          </ul>
+          </div>
         </section>
       )}
 
-      {status === "error" && errorMessage && (
-        <div className="rounded-xl border border-red-900 bg-red-950/50 p-4 text-sm text-red-300">
-          {errorMessage}
-        </div>
+      {project && (
+        <>
+          {project.log.length > 0 && (
+            <section className="space-y-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+              <h2 className="text-sm font-medium text-neutral-300">Progress</h2>
+              <ul className="space-y-1 font-mono text-xs text-neutral-400">
+                {project.log.map((message, i) => (
+                  <li key={i}>{message}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {project.status === "error" && project.errorMessage && (
+            <div className="space-y-2 rounded-xl border border-red-900 bg-red-950/50 p-4 text-sm text-red-300">
+              <p>{project.errorMessage}</p>
+              <button
+                type="button"
+                onClick={() => handleRetry(project.jobId)}
+                className="rounded-lg bg-red-900/50 px-3 py-1.5 text-sm font-medium text-red-200 hover:bg-red-900"
+              >
+                Retry (resumes from what's already done)
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {clips.length > 0 && (
@@ -188,9 +275,9 @@ export default function Home() {
                   List
                 </button>
               </div>
-              {jobId && (
+              {activeJobId && (
                 <a
-                  href={`/api/clips/${jobId}/download`}
+                  href={`/api/clips/${activeJobId}/download`}
                   className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-black hover:bg-white"
                 >
                   Download all as ZIP
@@ -199,12 +286,10 @@ export default function Home() {
             </div>
           </div>
 
-          {jobId && (
-            <p className="text-xs text-neutral-500">
-              TikTok lets you bulk-upload up to 30 videos at once - unzip and select them all in the
-              upload picker.
-            </p>
-          )}
+          <p className="text-xs text-neutral-500">
+            TikTok lets you bulk-upload up to 30 videos at once - unzip and select them all in the
+            upload picker. Done with this project? Delete it above to free up disk space.
+          </p>
 
           {viewMode === "grid" ? (
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -236,6 +321,16 @@ export default function Home() {
       )}
     </main>
   );
+}
+
+function StatusBadge({ status }: { status: ProjectState["status"] }) {
+  const styles =
+    status === "done"
+      ? "bg-green-950/50 text-green-300 border-green-900"
+      : status === "error"
+        ? "bg-red-950/50 text-red-300 border-red-900"
+        : "bg-neutral-800 text-neutral-300 border-neutral-700";
+  return <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-xs ${styles}`}>{status}</span>;
 }
 
 function ClipRow({ clip }: { clip: GeneratedClip }) {

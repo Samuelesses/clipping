@@ -33,6 +33,25 @@ videos at once from a folder.
 Everything runs locally as a single Next.js app (UI + API routes) - there's no server to
 deploy, no database, and no accounts. Only one API key is needed (OpenAI).
 
+## Progress is saved - dropped connections don't lose your work
+
+Each job runs as a background process on your machine, independent of the browser tab that
+started it - the page just polls for progress. That means:
+
+- **Closing the tab, a WiFi blip, or your laptop sleeping doesn't stop or lose the job.** Reopen
+  the app and it picks the same project back up from wherever it got to.
+- **Every step is checkpointed to disk** (`data/<job-id>/`): the downloaded video, the
+  transcript, and the selected highlights are each saved as soon as they're ready. Network calls
+  (download, transcription, highlight selection) also auto-retry a few times with backoff before
+  giving up.
+- **If a job does fail** (e.g. your internet actually dropped for a while), it shows up in the
+  **Projects** list with a **Retry** button. Retrying reuses whatever was already
+  downloaded/transcribed/selected instead of starting over from scratch - it only redoes the
+  step that failed (and any clips not yet cut).
+- **Delete a project** from the list once you're done with it - this removes its generated
+  clips, and any leftover working files, freeing up disk space. Nothing is deleted
+  automatically.
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) 18.18+
@@ -85,10 +104,11 @@ Downloading and cutting video with `yt-dlp`/`ffmpeg` is free (just your own comp
 
 ## Notes & limitations
 
-- Downloaded source video and intermediate audio/caption files are written to `data/<job-id>/`
-  and deleted once a job finishes (successfully or not). Generated clips are kept in
-  `public/clips/<job-id>/` so you can preview/download them - delete that folder yourself to
-  reclaim disk space.
+- Downloaded source video and intermediate transcript/highlight checkpoints are written to
+  `data/<job-id>/` and kept until the job finishes successfully (or you delete the project) -
+  see "Progress is saved" above. Generated clips are kept in `public/clips/<job-id>/`, and the
+  project's own record lives in `data/projects/<job-id>.json`; deleting a project from the UI
+  removes all three.
 - Only download content you have the right to use. Respect YouTube's and Twitch's Terms of
   Service - this tool is intended for personal use (e.g. clipping your own streams/videos, or
   ones you're otherwise permitted to download).
