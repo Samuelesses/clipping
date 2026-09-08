@@ -70,10 +70,11 @@ export async function findHighlights(
           "boundaries - start right as a sentence/thought begins (never mid-sentence or mid-word) and end " +
           "right after a sentence/thought completes, so the clip doesn't feel cut off. Clip length is a " +
           "target, not a hard limit: it's fine to run somewhat longer to include the full setup and " +
-          "payoff of a joke or story, and fine to come in shorter for a moment that's naturally brief - " +
-          "but never more than 50% over the requested maximum, and don't pad out or extend a clip just " +
-          "to hit a minimum. A complete, satisfying moment within that range matters more than hitting " +
-          "an exact duration. Scan the ENTIRE transcript from start to finish and pick clips spread across " +
+          "payoff of a joke or story - but never more than 50% over the requested maximum, and never " +
+          "under the requested minimum. If a moment is naturally brief, extend the clip to include " +
+          "surrounding context (reaction, follow-up, related back-and-forth) rather than submitting a " +
+          "clip shorter than the minimum. A complete, satisfying moment within that range matters more " +
+          "than hitting an exact duration. Scan the ENTIRE transcript from start to finish and pick clips spread across " +
           "different moments/timestamps - never pick two clips covering the same or overlapping moment, " +
           "and don't cluster every pick in one section unless the rest of the video genuinely has nothing " +
           "else worth clipping. Aim for variety across the categories above rather than several of the " +
@@ -113,9 +114,44 @@ export async function findHighlights(
         end: Math.min(info.duration, snapEnd(end, segments)),
       };
     })
+    .map((clip) => enforceMinDuration(clip, segments, options.minClipSeconds, info.duration))
+    .filter((clip): clip is HighlightClip => clip !== null)
     .map((clip) => capDuration(clip, segments, options.maxClipSeconds));
 
   return dedupeOverlapping(clips).slice(0, options.clipCount);
+}
+
+// The prompt asks the model to never come in under the requested minimum, but (like the
+// maximum) models don't reliably follow numeric limits - enforce it in code too, the same
+// way capDuration enforces the maximum. Extends the end forward to the nearest real
+// transcript boundary at or after start+minClipSeconds, so short clips grow to include
+// natural follow-up/context instead of landing mid-sentence. If there isn't enough video
+// left after this clip's start to reach the minimum at all (e.g. it starts right near the
+// end of the video), the clip is dropped rather than shipped short.
+export function enforceMinDuration(
+  clip: HighlightClip,
+  segments: TranscriptSegment[],
+  minClipSeconds: number,
+  videoDuration: number,
+): HighlightClip | null {
+  if (clip.end - clip.start >= minClipSeconds) return clip;
+
+  const target = clip.start + minClipSeconds;
+  let newEnd = Infinity;
+  for (const segment of segments) {
+    if (segment.end >= target && segment.end < newEnd) {
+      newEnd = segment.end;
+    }
+  }
+  if (!Number.isFinite(newEnd)) {
+    newEnd = target;
+  }
+  newEnd = Math.min(newEnd, videoDuration);
+
+  if (newEnd - clip.start < minClipSeconds) {
+    return null;
+  }
+  return { ...clip, end: newEnd };
 }
 
 // The prompt asks the model to stay within ~50% of the requested max, but models don't
