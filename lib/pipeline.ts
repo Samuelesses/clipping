@@ -3,7 +3,7 @@ import path from "path";
 import { fetchCaptions } from "./captions";
 import { cutClip, extractAudio, getVideoDimensions, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
-import { addClip, appendLog, loadProject, setStatus, setTitle } from "./projects";
+import { addClip, appendLog, loadProject, setPendingHighlights, setStatus, setTitle } from "./projects";
 import { withRetry } from "./retry";
 import { writeClipAss } from "./subtitles";
 import { transcribeAudio } from "./transcribe";
@@ -61,6 +61,24 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
       throw new Error("The model didn't return any candidate clips - try a different video or lower the clip count.");
     }
 
+    // If review-before-cutting is on, stop here and hand the candidate highlights to
+    // the UI for editing/approval instead of cutting immediately. A "reviewed.flag"
+    // marker (written by the /cut endpoint once the user approves) means this job
+    // already went through review on a previous run - e.g. resuming after a retry -
+    // so it should fall straight through to cutting instead of looping back to
+    // "reviewing" forever.
+    const reviewedFlagPath = path.join(workDir, "reviewed.flag");
+    const alreadyReviewed = await fs
+      .access(reviewedFlagPath)
+      .then(() => true)
+      .catch(() => false);
+    if (options.reviewBeforeCutting && !alreadyReviewed) {
+      await setPendingHighlights(jobId, highlights);
+      await setStatus(jobId, "reviewing");
+      await log("Candidate clips are ready for review - waiting for approval before cutting.");
+      return;
+    }
+
     await log(`Found ${highlights.length} candidate clips. Cutting video...`);
 
     const clipsDir = path.join(PUBLIC_CLIPS_DIR, jobId);
@@ -104,12 +122,14 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
           highlight.title,
           subtitlesPath,
           videoBottomY,
+          options.animatedCaptions,
         );
       }
 
       const fileName = `clip-${index + 1}.mp4`;
       await cutClip(videoPath, path.join(clipsDir, fileName), highlight.start, highlight.end, {
         vertical: options.vertical,
+        reframeStyle: options.reframeStyle,
         subtitlesPath,
       });
 

@@ -1,6 +1,6 @@
 import { isValidJobId } from "@/lib/jobId";
-import { runPipeline } from "@/lib/pipeline";
 import { appendLog, loadProject, setStatus } from "@/lib/projects";
+import { enqueueJob } from "@/lib/queue";
 import { NextResponse } from "next/server";
 
 export async function POST(_request: Request, { params }: { params: Promise<{ jobId: string }> }) {
@@ -13,19 +13,20 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
   if (!project) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
-  if (project.status === "running") {
-    return NextResponse.json({ error: "This project is already running." }, { status: 409 });
+  if (project.status === "running" || project.status === "queued") {
+    return NextResponse.json({ error: "This project is already queued or running." }, { status: 409 });
+  }
+  if (project.status === "reviewing") {
+    return NextResponse.json({ error: "This project is awaiting review - use the review screen instead." }, { status: 409 });
   }
 
-  await setStatus(jobId, "running");
+  await setStatus(jobId, "queued");
   await appendLog(jobId, "Retrying - reusing whatever was already downloaded/transcribed/selected...");
 
-  // Fire-and-forget, same as a fresh job - runPipeline resumes from whatever
-  // checkpoints (source video, transcript, highlights, already-cut clips) it finds
-  // under data/<jobId>/ instead of starting over.
-  runPipeline(jobId, project.url, project.options).catch(() => {
-    // runPipeline already persists its own error state.
-  });
+  // Goes through the same concurrency-limited queue as a fresh job. runPipeline
+  // resumes from whatever checkpoints (source video, transcript, highlights,
+  // already-cut clips) it finds under data/<jobId>/ instead of starting over.
+  enqueueJob(jobId, project.url, project.options);
 
   return NextResponse.json({ ok: true });
 }

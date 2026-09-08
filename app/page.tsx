@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { GeneratedClip, ProjectState } from "@/lib/types";
+import type { GeneratedClip, HighlightClip, ProjectState, ReframeStyle } from "@/lib/types";
 
 type ViewMode = "grid" | "list";
 
@@ -9,12 +9,15 @@ const ACTIVE_JOB_KEY = "clipping.activeJobId";
 const POLL_INTERVAL_MS = 1500;
 
 export default function Home() {
-  const [url, setUrl] = useState("");
+  const [urlsText, setUrlsText] = useState("");
   const [clipCount, setClipCount] = useState(5);
   const [minClipSeconds, setMinClipSeconds] = useState(20);
   const [maxClipSeconds, setMaxClipSeconds] = useState(120);
   const [vertical, setVertical] = useState(true);
+  const [reframeStyle, setReframeStyle] = useState<ReframeStyle>("blur");
   const [burnCaptions, setBurnCaptions] = useState(true);
+  const [animatedCaptions, setAnimatedCaptions] = useState(false);
+  const [reviewBeforeCutting, setReviewBeforeCutting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -23,6 +26,10 @@ export default function Home() {
   const [project, setProject] = useState<ProjectState | null>(null);
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [reviewDrafts, setReviewDrafts] = useState<HighlightClip[]>([]);
+  const [reviewJobId, setReviewJobId] = useState<string | null>(null);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -41,7 +48,7 @@ export default function Home() {
         if (!res.ok) return; // transient failure - just try again next tick
         const data: ProjectState = await res.json();
         setProject(data);
-        if (data.status !== "running" && pollRef.current) {
+        if (data.status !== "running" && data.status !== "queued" && pollRef.current) {
           clearInterval(pollRef.current);
           refreshProjects();
         }
@@ -56,6 +63,19 @@ export default function Home() {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [activeJobId]);
+
+  // Seed the editable review draft once a job enters "reviewing" - keyed on jobId so
+  // it doesn't clobber in-progress edits on every poll tick while still on that job.
+  useEffect(() => {
+    if (project && project.status === "reviewing" && project.jobId !== reviewJobId) {
+      setReviewDrafts(project.pendingHighlights ?? []);
+      setReviewJobId(project.jobId);
+      setReviewError(null);
+    }
+    if (project && project.status !== "reviewing" && reviewJobId === project.jobId) {
+      setReviewJobId(null);
+    }
+  }, [project, reviewJobId]);
 
   async function refreshProjects() {
     try {
@@ -75,7 +95,11 @@ export default function Home() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!url.trim() || submitting) return;
+    const urls = urlsText
+      .split("\n")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (urls.length === 0 || submitting) return;
 
     setSubmitting(true);
     setSubmitError(null);
@@ -84,13 +108,28 @@ export default function Home() {
       const response = await fetch("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, clipCount, minClipSeconds, maxClipSeconds, vertical, burnCaptions }),
+        body: JSON.stringify({
+          urls,
+          clipCount,
+          minClipSeconds,
+          maxClipSeconds,
+          vertical,
+          reframeStyle,
+          burnCaptions,
+          animatedCaptions,
+          reviewBeforeCutting,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `Request failed with status ${response.status}`);
 
-      setProject(null);
-      selectJob(data.jobId);
+      const jobIds: string[] = data.jobIds ?? [];
+      if (jobIds.length > 0) {
+        setProject(null);
+        selectJob(jobIds[0]);
+      }
+      setUrlsText("");
+      refreshProjects();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -120,32 +159,63 @@ export default function Home() {
     refreshProjects();
   }
 
+  function updateDraft(index: number, patch: Partial<HighlightClip>) {
+    setReviewDrafts((drafts) => drafts.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+  }
+
+  function removeDraft(index: number) {
+    setReviewDrafts((drafts) => drafts.filter((_, i) => i !== index));
+  }
+
+  async function handleApproveCut(jobId: string) {
+    setReviewSubmitting(true);
+    setReviewError(null);
+    try {
+      const res = await fetch(`/api/projects/${jobId}/cut`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ highlights: reviewDrafts }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not start cutting.");
+      setReviewJobId(null);
+      refreshProjects();
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Could not start cutting.");
+    } finally {
+      setReviewSubmitting(false);
+    }
+  }
+
   const clips: GeneratedClip[] = project?.clips ?? [];
+  const urlCount = urlsText.split("\n").map((u) => u.trim()).filter(Boolean).length;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-16">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Clipping</h1>
         <p className="text-neutral-400">
-          Paste a YouTube video or Twitch VOD link. It downloads locally, gets a transcript, and asks
-          AI to pick the best moments, cut into vertical clips with captions ready to post. Progress is
-          saved as it goes, so a dropped connection never loses your place.
+          Paste one or more YouTube video or Twitch VOD links (one per line). Each downloads locally, gets
+          a transcript, and asks AI to pick the best moments, cut into vertical clips with captions ready
+          to post. Progress is saved as it goes, so a dropped connection never loses your place.
         </p>
       </header>
 
       <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
         <div className="flex flex-col gap-2">
-          <label htmlFor="url" className="text-sm font-medium text-neutral-300">
-            Video URL
+          <label htmlFor="urls" className="text-sm font-medium text-neutral-300">
+            Video URL{urlCount > 1 ? "s" : ""} {urlCount > 1 && <span className="text-neutral-500">({urlCount})</span>}
           </label>
-          <input
-            id="url"
-            type="url"
+          <textarea
+            id="urls"
             required
-            placeholder="https://www.youtube.com/watch?v=... or https://www.twitch.tv/videos/..."
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm outline-none focus:border-neutral-500"
+            rows={3}
+            placeholder={
+              "https://www.youtube.com/watch?v=...\nhttps://www.twitch.tv/videos/...\n(one URL per line to batch-process multiple videos)"
+            }
+            value={urlsText}
+            onChange={(e) => setUrlsText(e.target.value)}
+            className="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm outline-none focus:border-neutral-500"
           />
         </div>
 
@@ -172,15 +242,47 @@ export default function Home() {
               />
               <CheckboxField label="Burn in title & captions" checked={burnCaptions} onChange={setBurnCaptions} />
             </div>
+
+            {vertical && (
+              <div className="space-y-1.5">
+                <span className="text-sm font-medium text-neutral-300">Vertical reframe style</span>
+                <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
+                  <RadioField
+                    label="Blur padding (keeps full frame, blurred fill top/bottom)"
+                    checked={reframeStyle === "blur"}
+                    onChange={() => setReframeStyle("blur")}
+                  />
+                  <RadioField
+                    label="Crop to fill (zooms in, no padding, may cut off edges)"
+                    checked={reframeStyle === "crop"}
+                    onChange={() => setReframeStyle("crop")}
+                  />
+                </div>
+              </div>
+            )}
+
+            {burnCaptions && (
+              <CheckboxField
+                label="Animated word-by-word captions (highlights each word as it's spoken)"
+                checked={animatedCaptions}
+                onChange={setAnimatedCaptions}
+              />
+            )}
+
+            <CheckboxField
+              label="Review & edit clip picks before cutting (pause after AI selects moments)"
+              checked={reviewBeforeCutting}
+              onChange={setReviewBeforeCutting}
+            />
           </div>
         )}
 
         <button
           type="submit"
-          disabled={submitting || !url.trim()}
+          disabled={submitting || urlCount === 0}
           className="w-full rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? "Starting..." : "Generate clips"}
+          {submitting ? "Starting..." : urlCount > 1 ? `Generate clips (${urlCount} videos)` : "Generate clips"}
         </button>
 
         {submitError && <p className="text-sm text-red-400">{submitError}</p>}
@@ -250,6 +352,83 @@ export default function Home() {
                 Retry (resumes from what's already done)
               </button>
             </div>
+          )}
+
+          {project.status === "reviewing" && (
+            <section className="space-y-4 rounded-xl border border-amber-900 bg-amber-950/20 p-6">
+              <div className="space-y-1">
+                <h2 className="text-lg font-medium text-amber-200">Review clip picks</h2>
+                <p className="text-sm text-amber-200/70">
+                  The AI found {reviewDrafts.length} candidate clip{reviewDrafts.length === 1 ? "" : "s"}. Trim the
+                  start/end times, rename, remove any you don't want, then approve to start cutting.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {reviewDrafts.map((clip, i) => (
+                  <div key={i} className="space-y-2 rounded-lg border border-neutral-800 bg-neutral-950 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <input
+                        type="text"
+                        value={clip.title}
+                        onChange={(e) => updateDraft(i, { title: e.target.value })}
+                        className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-sm font-medium outline-none focus:border-neutral-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeDraft(i)}
+                        className="flex-shrink-0 text-sm text-neutral-500 underline underline-offset-2 hover:text-red-400"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+                        Start (s)
+                        <input
+                          type="number"
+                          value={Math.round(clip.start)}
+                          min={0}
+                          onChange={(e) => updateDraft(i, { start: Number(e.target.value) })}
+                          className="w-20 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm outline-none focus:border-neutral-500"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+                        End (s)
+                        <input
+                          type="number"
+                          value={Math.round(clip.end)}
+                          min={0}
+                          onChange={(e) => updateDraft(i, { end: Number(e.target.value) })}
+                          className="w-20 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm outline-none focus:border-neutral-500"
+                        />
+                      </label>
+                      <span className="text-xs text-neutral-500">
+                        {Math.max(0, Math.round(clip.end - clip.start))}s
+                      </span>
+                    </div>
+                    <p className="text-sm text-neutral-400">{clip.reason}</p>
+                  </div>
+                ))}
+                {reviewDrafts.length === 0 && (
+                  <p className="text-sm text-amber-200/70">
+                    No clips left - remove was maybe a bit too enthusiastic. Retry the project to get a fresh set of
+                    candidates.
+                  </p>
+                )}
+              </div>
+
+              {reviewError && <p className="text-sm text-red-400">{reviewError}</p>}
+
+              <button
+                type="button"
+                disabled={reviewSubmitting || reviewDrafts.length === 0}
+                onClick={() => handleApproveCut(project.jobId)}
+                className="w-full rounded-lg bg-amber-400 px-4 py-2.5 text-sm font-medium text-black transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {reviewSubmitting ? "Starting..." : `Approve & cut ${reviewDrafts.length} clip${reviewDrafts.length === 1 ? "" : "s"}`}
+              </button>
+            </section>
           )}
         </>
       )}
@@ -329,7 +508,9 @@ function StatusBadge({ status }: { status: ProjectState["status"] }) {
       ? "bg-green-950/50 text-green-300 border-green-900"
       : status === "error"
         ? "bg-red-950/50 text-red-300 border-red-900"
-        : "bg-neutral-800 text-neutral-300 border-neutral-700";
+        : status === "reviewing"
+          ? "bg-amber-950/50 text-amber-300 border-amber-900"
+          : "bg-neutral-800 text-neutral-300 border-neutral-700";
   return <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-xs ${styles}`}>{status}</span>;
 }
 
@@ -425,6 +606,28 @@ function CheckboxField({
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         className="h-4 w-4 rounded border-neutral-700 bg-neutral-950 accent-white"
+      />
+      {label}
+    </label>
+  );
+}
+
+function RadioField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-neutral-300">
+      <input
+        type="radio"
+        checked={checked}
+        onChange={onChange}
+        className="h-4 w-4 border-neutral-700 bg-neutral-950 accent-white"
       />
       {label}
     </label>

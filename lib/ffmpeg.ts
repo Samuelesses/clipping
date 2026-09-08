@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { run } from "./exec";
+import type { ReframeStyle } from "./types";
 
 // Bundled fonts (see fonts/README.md) so burned-in text looks the same on every
 // machine, regardless of what's installed locally - see lib/subtitles.ts for the
@@ -108,8 +109,17 @@ export async function splitAudioIntoChunks(
 }
 
 export interface CutClipOptions {
-  /** Reformat to 9:16 (1080x1920) with a blurred, filled background - good for Shorts/Reels/TikTok. */
+  /** Reformat to 9:16 (1080x1920) - good for Shorts/Reels/TikTok. */
   vertical?: boolean;
+  /**
+   * How to fill the 9:16 frame when `vertical` is set:
+   * - "blur" (default): shrink the full frame to fit width, fill the rest with a
+   *   blurred copy of itself - nothing is ever cropped out, but there's letterboxing.
+   * - "crop": crop straight to a centered 9:16 slice of the original frame - fills
+   *   the screen edge-to-edge with no letterboxing, at the cost of cutting off the
+   *   left/right edges of the source (a fixed center crop, not subject tracking).
+   */
+  reframeStyle?: ReframeStyle;
   /** Path to an .ass caption file (see lib/subtitles.ts) to burn in as open captions. */
   subtitlesPath?: string;
 }
@@ -128,11 +138,20 @@ export async function cutClip(
   let videoLabel: string | null = null;
 
   if (options.vertical) {
-    filters.push(
-      "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=20[bg]",
-      "[0:v]scale=1080:-2[fg]",
-      "[bg][fg]overlay=(W-w)/2:(H-h)/2[vertical]",
-    );
+    if (options.reframeStyle === "crop") {
+      // Centered crop to a 9:16 slice, then scale to the target canvas. Works for any
+      // source aspect ratio: crops the sides for wide (e.g. 16:9) sources, or the
+      // top/bottom for anything narrower than 9:16.
+      filters.push(
+        "[0:v]crop=w='if(gt(iw/ih,9/16),ih*9/16,iw)':h='if(gt(iw/ih,9/16),ih,iw*16/9)',scale=1080:1920[vertical]",
+      );
+    } else {
+      filters.push(
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=20[bg]",
+        "[0:v]scale=1080:-2[fg]",
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2[vertical]",
+      );
+    }
     videoLabel = "vertical";
   }
 

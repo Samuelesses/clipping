@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { run } from "./exec";
-import type { TranscriptSegment } from "./types";
+import type { TranscriptSegment, TranscriptWord } from "./types";
 
 /**
  * Tries to grab YouTube's own subtitles (manually uploaded or auto-generated) via
@@ -42,9 +42,24 @@ export async function fetchCaptions(url: string, workDir: string): Promise<Trans
 const TIME_RE =
   /(\d{2}:)?\d{2}:\d{2}\.\d{3}\s*-->\s*(\d{2}:)?\d{2}:\d{2}\.\d{3}/;
 
+interface RawWord {
+  text: string;
+  start: number;
+}
+
+interface RawCue {
+  start: number;
+  end: number;
+  words: RawWord[];
+  /** True if this cue actually carried inline per-word timing (auto-generated
+   * captions do, via <00:00:01.240><c> tags; manually-uploaded captions usually
+   * don't, in which case every word here just has the cue's own start time). */
+  hasWordTiming: boolean;
+}
+
 export function parseVtt(content: string): TranscriptSegment[] {
   const lines = content.split(/\r?\n/);
-  const rawCues: { start: number; end: number; text: string }[] = [];
+  const rawCues: RawCue[] = [];
 
   let i = 0;
   while (i < lines.length) {
@@ -53,13 +68,15 @@ export function parseVtt(content: string): TranscriptSegment[] {
       const start = parseVttTime(startStr);
       const end = parseVttTime(endStr);
       i++;
-      const textLines: string[] = [];
+      const words: RawWord[] = [];
+      let hasWordTiming = false;
       while (i < lines.length && lines[i].trim() !== "") {
-        textLines.push(cleanCueText(lines[i]));
+        const parsed = parseWordsFromLine(lines[i], start);
+        words.push(...parsed.words);
+        if (parsed.sawTag) hasWordTiming = true;
         i++;
       }
-      const text = textLines.join(" ").replace(/\s+/g, " ").trim();
-      if (text) rawCues.push({ start, end, text });
+      if (words.length > 0) rawCues.push({ start, end, words, hasWordTiming });
     } else {
       i++;
     }
@@ -72,13 +89,18 @@ export function parseVtt(content: string): TranscriptSegment[] {
   const segments: TranscriptSegment[] = [];
   let previousWords: string[] = [];
   for (const cue of rawCues) {
-    const words = cue.text.split(/\s+/).filter(Boolean);
-    const overlap = wordOverlap(previousWords, words);
-    const incremental = words.slice(overlap).join(" ");
-    previousWords = words;
-    if (incremental) {
-      segments.push({ start: cue.start, end: cue.end, text: incremental });
-    }
+    const wordTexts = cue.words.map((w) => w.text);
+    const overlap = wordOverlap(previousWords, wordTexts);
+    const incremental = cue.words.slice(overlap);
+    previousWords = wordTexts;
+    if (incremental.length === 0) continue;
+
+    const text = incremental.map((w) => w.text).join(" ");
+    const words: TranscriptWord[] | undefined = cue.hasWordTiming
+      ? incremental.map((w) => ({ start: w.start, text: w.text }))
+      : undefined;
+
+    segments.push({ start: incremental[0].start, end: cue.end, text, words });
   }
   return segments;
 }
@@ -94,10 +116,36 @@ function wordOverlap(prev: string[], curr: string[]): number {
   return 0;
 }
 
-function cleanCueText(line: string): string {
-  return decodeHtmlEntities(
-    line.replace(/<[^>]+>/g, ""), // inline timing/style tags in auto-subs, e.g. <00:00:01.240><c>
-  ).trim();
+// Matches either an inline timestamp tag (captured, for timing) or any other tag
+// (voice/style/<c> tags etc., stripped with no timing effect).
+const INLINE_TAG_RE = /<(\d{2}:\d{2}:\d{2}\.\d{3})>|<[^>]+>/g;
+
+function parseWordsFromLine(line: string, cueStart: number): { words: RawWord[]; sawTag: boolean } {
+  const words: RawWord[] = [];
+  let currentTime = cueStart;
+  let sawTag = false;
+  let lastIndex = 0;
+
+  const flushText = (text: string, time: number) => {
+    for (const raw of text.split(/\s+/)) {
+      const word = decodeHtmlEntities(raw);
+      if (word) words.push({ text: word, start: time });
+    }
+  };
+
+  INLINE_TAG_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = INLINE_TAG_RE.exec(line)) !== null) {
+    flushText(line.slice(lastIndex, match.index), currentTime);
+    if (match[1]) {
+      currentTime = parseVttTime(match[1]);
+      sawTag = true;
+    }
+    lastIndex = INLINE_TAG_RE.lastIndex;
+  }
+  flushText(line.slice(lastIndex), currentTime);
+
+  return { words, sawTag };
 }
 
 // WebVTT cues are HTML-escaped, so things like speaker-change markers show up as

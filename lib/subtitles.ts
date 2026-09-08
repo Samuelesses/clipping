@@ -13,6 +13,12 @@ interface Cue {
   text: string;
 }
 
+interface TimedWord {
+  text: string;
+  start: number;
+  end: number;
+}
+
 /**
  * Writes an ASS (Advanced SubStation Alpha) caption file for a single clip: a bottom
  * caption track built from the transcript, plus a title burned in at the top for the
@@ -22,6 +28,12 @@ interface Cue {
  * (via the `subtitles` filter) assumes a fixed 384x288 canvas and silently
  * mis-scales/mis-positions text on anything else, which is exactly wrong for a
  * 1080x1920 vertical clip.
+ *
+ * When `animated` is true and word-level timestamps are available (see
+ * TranscriptSegment.words), captions render word-by-word: one word at a time pops
+ * into an accent color as it's spoken, in the context of the rest of its caption
+ * card - otherwise (or wherever word timing isn't available) captions fall back to a
+ * plain static line per card.
  */
 export async function writeClipAss(
   segments: TranscriptSegment[],
@@ -32,17 +44,8 @@ export async function writeClipAss(
   title: string,
   outPath: string,
   videoBottomY: number | null = null,
+  animated = false,
 ): Promise<void> {
-  const cues: Cue[] = segments
-    .filter((s) => s.end > clipStart && s.start < clipEnd)
-    .map((s) => ({
-      start: Math.max(0, s.start - clipStart),
-      end: Math.min(clipEnd - clipStart, s.end - clipStart),
-      text: sanitizeAssText(s.text.trim()),
-    }))
-    .filter((cue) => cue.end > cue.start && cue.text.length > 0)
-    .flatMap(splitLongCue);
-
   const captionFontSize = Math.round(canvasHeight * 0.038);
   const titleFontSize = Math.round(canvasHeight * 0.062);
   const titleMarginV = Math.round(canvasHeight * 0.09);
@@ -66,6 +69,9 @@ export async function writeClipAss(
   // every machine instead of falling back to whatever's installed locally.
   const titleColour = "&H0000D7FF";
   const captionColour = "&H00FFFFFF";
+  // Same gold as the title, but as a bare BGR inline override (no alpha byte) for the
+  // \c tag used to pop the currently-spoken word in animated captions.
+  const highlightInline = "&H00D7FF&";
 
   const header =
     "[Script Info]\n" +
@@ -89,11 +95,82 @@ export async function writeClipAss(
 
   const titleLine = `Dialogue: 0,${formatAssTime(0)},${formatAssTime(clipEnd - clipStart)},Title,,0,0,0,,${truncateTitle(title)}\n`;
 
-  const captionLines = cues
-    .map((cue) => `Dialogue: 0,${formatAssTime(cue.start)},${formatAssTime(cue.end)},Caption,,0,0,0,,${cue.text}\n`)
-    .join("");
+  const wordChunks = animated ? buildWordChunks(segments, clipStart, clipEnd) : null;
+  const captionLines = wordChunks
+    ? wordChunks.flatMap((chunk) => buildAnimatedDialogueLines(chunk, highlightInline)).join("\n") +
+      (wordChunks.length > 0 ? "\n" : "")
+    : buildPlainCaptionCues(segments, clipStart, clipEnd)
+        .map((cue) => `Dialogue: 0,${formatAssTime(cue.start)},${formatAssTime(cue.end)},Caption,,0,0,0,,${cue.text}\n`)
+        .join("");
 
   await fs.writeFile(outPath, header + titleLine + captionLines, "utf8");
+}
+
+function buildPlainCaptionCues(segments: TranscriptSegment[], clipStart: number, clipEnd: number): Cue[] {
+  return segments
+    .filter((s) => s.end > clipStart && s.start < clipEnd)
+    .map((s) => ({
+      start: Math.max(0, s.start - clipStart),
+      end: Math.min(clipEnd - clipStart, s.end - clipStart),
+      text: sanitizeAssText(s.text.trim()),
+    }))
+    .filter((cue) => cue.end > cue.start && cue.text.length > 0)
+    .flatMap(splitLongCue);
+}
+
+/**
+ * Flattens per-word timestamps from the segments overlapping this clip into
+ * <=MAX_WORDS_PER_CAPTION-word chunks, re-based to the clip's own timeline. Returns
+ * null if any overlapping segment lacks word timing, so the caller falls back to
+ * plain static captions rather than mixing animated and static cards.
+ */
+function buildWordChunks(segments: TranscriptSegment[], clipStart: number, clipEnd: number): TimedWord[][] | null {
+  const relevant = segments.filter((s) => s.end > clipStart && s.start < clipEnd);
+  if (relevant.length === 0) return null;
+  if (relevant.some((s) => !s.words || s.words.length === 0)) return null;
+
+  const flatWords: TimedWord[] = [];
+  for (const segment of relevant) {
+    const words = segment.words!;
+    for (let i = 0; i < words.length; i++) {
+      const wordStart = words[i].start;
+      const wordEnd = i + 1 < words.length ? words[i + 1].start : segment.end;
+      if (wordEnd <= clipStart || wordStart >= clipEnd) continue;
+      const text = sanitizeAssText(words[i].text);
+      if (!text) continue;
+      flatWords.push({
+        text,
+        start: Math.max(0, wordStart - clipStart),
+        end: Math.min(clipEnd - clipStart, wordEnd - clipStart),
+      });
+    }
+  }
+  if (flatWords.length === 0) return null;
+
+  const chunks: TimedWord[][] = [];
+  for (let i = 0; i < flatWords.length; i += MAX_WORDS_PER_CAPTION) {
+    chunks.push(flatWords.slice(i, i + MAX_WORDS_PER_CAPTION).filter((w) => w.end > w.start));
+  }
+  return chunks.filter((chunk) => chunk.length > 0);
+}
+
+/** One Dialogue line per word in the chunk, each showing the full chunk text with just
+ * that word popped into the highlight color for its own [start, end) - the classic
+ * "current word highlighted" short-form caption style. */
+function buildAnimatedDialogueLines(chunk: TimedWord[], highlightInline: string): string[] {
+  return chunk.map((word, i) => {
+    const before = chunk
+      .slice(0, i)
+      .map((w) => w.text)
+      .join(" ");
+    const after = chunk
+      .slice(i + 1)
+      .map((w) => w.text)
+      .join(" ");
+    const highlighted = `{\\c${highlightInline}}${word.text}{\\c}`;
+    const text = [before, highlighted, after].filter(Boolean).join(" ");
+    return `Dialogue: 0,${formatAssTime(word.start)},${formatAssTime(word.end)},Caption,,0,0,0,,${text}`;
+  });
 }
 
 function splitLongCue(cue: Cue): Cue[] {

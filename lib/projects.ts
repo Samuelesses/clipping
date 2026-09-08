@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import type { GeneratedClip, ProcessOptions, ProjectState, ProjectStatus } from "./types";
+import type { GeneratedClip, HighlightClip, ProcessOptions, ProjectState, ProjectStatus } from "./types";
 
 const PROJECTS_DIR = path.join(process.cwd(), "data", "projects");
 const CLIPS_DIR = path.join(process.cwd(), "public", "clips");
@@ -18,15 +18,21 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   await fs.rename(tmpPath, filePath);
 }
 
-export async function createProject(jobId: string, url: string, options: ProcessOptions): Promise<ProjectState> {
+export async function createProject(
+  jobId: string,
+  url: string,
+  options: ProcessOptions,
+  initialStatus: ProjectStatus = "queued",
+): Promise<ProjectState> {
   const now = new Date().toISOString();
   const state: ProjectState = {
     jobId,
     url,
     title: null,
     options,
-    status: "running",
+    status: initialStatus,
     log: [],
+    pendingHighlights: null,
     clips: [],
     errorMessage: null,
     createdAt: now,
@@ -75,6 +81,12 @@ export async function setStatus(jobId: string, status: ProjectStatus, errorMessa
   await updateProject(jobId, (state) => {
     state.status = status;
     state.errorMessage = errorMessage ?? null;
+  });
+}
+
+export async function setPendingHighlights(jobId: string, highlights: HighlightClip[] | null): Promise<void> {
+  await updateProject(jobId, (state) => {
+    state.pendingHighlights = highlights;
   });
 }
 
