@@ -5,7 +5,6 @@ import { fetchCaptions } from "@/lib/captions";
 import { cutClip, extractAudio, getVideoDimensions, supportsBurnedCaptions } from "@/lib/ffmpeg";
 import { findHighlights } from "@/lib/highlights";
 import { writeClipAss } from "@/lib/subtitles";
-import { postVideoToTikTok } from "@/lib/tiktok";
 import { transcribeAudio } from "@/lib/transcribe";
 import type { GeneratedClip, ProcessEvent, ProcessOptions, TranscriptSegment } from "@/lib/types";
 import { checkDependencies, downloadVideo, getVideoInfo } from "@/lib/ytdlp";
@@ -42,7 +41,6 @@ export async function POST(request: Request) {
     maxClipSeconds: clamp(Number(body.maxClipSeconds) || 120, 5, 600),
     vertical: body.vertical !== false,
     burnCaptions: body.burnCaptions !== false,
-    autoPostToTikTok: body.autoPostToTikTok === true,
   };
 
   const encoder = new TextEncoder();
@@ -144,36 +142,13 @@ export async function POST(request: Request) {
           }
 
           const fileName = `clip-${index + 1}.mp4`;
-          const clipPath = path.join(clipsDir, fileName);
-          await cutClip(videoPath, clipPath, highlight.start, highlight.end, {
+          await cutClip(videoPath, path.join(clipsDir, fileName), highlight.start, highlight.end, {
             vertical: options.vertical,
             subtitlesPath,
           });
           const clip: GeneratedClip = { ...highlight, url: `/clips/${jobId}/${fileName}` };
           clips.push(clip);
           send({ type: "clip", clip });
-
-          if (options.autoPostToTikTok) {
-            send({ type: "tiktok", clipIndex: index, status: "posting", message: "Posting to TikTok..." });
-            try {
-              const result = await postVideoToTikTok(clipPath, highlight.socialCaption);
-              send({
-                type: "tiktok",
-                clipIndex: index,
-                status: "posted",
-                message: result.postIds?.length
-                  ? `Posted to TikTok (post id ${result.postIds[0]}).`
-                  : "Posted to TikTok (check your inbox/drafts in the app).",
-              });
-            } catch (err) {
-              send({
-                type: "tiktok",
-                clipIndex: index,
-                status: "error",
-                message: err instanceof Error ? err.message : "Failed to post to TikTok.",
-              });
-            }
-          }
         }
 
         send({ type: "done", jobId, title: info.title, clips });

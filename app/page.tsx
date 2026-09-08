@@ -1,20 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { GeneratedClip, ProcessEvent } from "@/lib/types";
 
 type Status = "idle" | "running" | "done" | "error";
-
-interface TikTokStatus {
-  configured: boolean;
-  connected: boolean;
-  username?: string;
-}
-
-interface TikTokClipStatus {
-  status: "posting" | "posted" | "error";
-  message: string;
-}
 
 export default function Home() {
   const [url, setUrl] = useState("");
@@ -23,47 +12,13 @@ export default function Home() {
   const [maxClipSeconds, setMaxClipSeconds] = useState(120);
   const [vertical, setVertical] = useState(true);
   const [burnCaptions, setBurnCaptions] = useState(true);
-  const [autoPostToTikTok, setAutoPostToTikTok] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [status, setStatus] = useState<Status>("idle");
   const [log, setLog] = useState<string[]>([]);
   const [clips, setClips] = useState<GeneratedClip[]>([]);
-  const [tiktokStatuses, setTiktokStatuses] = useState<Record<number, TikTokClipStatus>>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-
-  const [tiktok, setTiktok] = useState<TikTokStatus>({ configured: false, connected: false });
-  const [tiktokBanner, setTiktokBanner] = useState<string | null>(null);
-
-  useEffect(() => {
-    refreshTikTokStatus();
-
-    const params = new URLSearchParams(window.location.search);
-    const connected = params.get("tiktok_connected");
-    const error = params.get("tiktok_error");
-    if (connected) setTiktokBanner("TikTok account connected.");
-    if (error) setTiktokBanner(`TikTok connection failed: ${error}`);
-    if (connected || error) {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, []);
-
-  async function refreshTikTokStatus() {
-    try {
-      const res = await fetch("/api/tiktok/status");
-      const json = await res.json();
-      setTiktok(json);
-    } catch {
-      // Ignore - the connect button will surface a clearer error if TikTok isn't set up.
-    }
-  }
-
-  async function handleDisconnectTikTok() {
-    await fetch("/api/tiktok/status", { method: "DELETE" });
-    setAutoPostToTikTok(false);
-    refreshTikTokStatus();
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -72,7 +27,6 @@ export default function Home() {
     setStatus("running");
     setLog([]);
     setClips([]);
-    setTiktokStatuses({});
     setErrorMessage(null);
 
     const controller = new AbortController();
@@ -82,15 +36,7 @@ export default function Home() {
       const response = await fetch("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url,
-          clipCount,
-          minClipSeconds,
-          maxClipSeconds,
-          vertical,
-          burnCaptions,
-          autoPostToTikTok: autoPostToTikTok && tiktok.connected,
-        }),
+        body: JSON.stringify({ url, clipCount, minClipSeconds, maxClipSeconds, vertical, burnCaptions }),
         signal: controller.signal,
       });
 
@@ -129,8 +75,6 @@ export default function Home() {
       setLog((prev) => [...prev, event.message]);
     } else if (event.type === "clip") {
       setClips((prev) => [...prev, event.clip]);
-    } else if (event.type === "tiktok") {
-      setTiktokStatuses((prev) => ({ ...prev, [event.clipIndex]: { status: event.status, message: event.message } }));
     } else if (event.type === "done") {
       setStatus("done");
     } else if (event.type === "error") {
@@ -148,39 +92,6 @@ export default function Home() {
           AI to pick the best moments, cut into vertical clips with captions ready to post.
         </p>
       </header>
-
-      <section className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900/50 p-4">
-        <div className="text-sm">
-          <span className="font-medium text-neutral-300">TikTok: </span>
-          {tiktok.connected ? (
-            <span className="text-green-400">Connected{tiktok.username ? ` as @${tiktok.username}` : ""}</span>
-          ) : (
-            <span className="text-neutral-500">Not connected</span>
-          )}
-        </div>
-        {tiktok.connected ? (
-          <button
-            type="button"
-            onClick={handleDisconnectTikTok}
-            className="text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
-          >
-            Disconnect
-          </button>
-        ) : (
-          <a
-            href="/api/tiktok/connect"
-            className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-black hover:bg-white"
-          >
-            Connect TikTok
-          </a>
-        )}
-      </section>
-
-      {tiktokBanner && (
-        <div className="rounded-xl border border-neutral-700 bg-neutral-900 p-4 text-sm text-neutral-300">
-          {tiktokBanner}
-        </div>
-      )}
 
       <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
         <div className="flex flex-col gap-2">
@@ -221,22 +132,6 @@ export default function Home() {
                 onChange={setVertical}
               />
               <CheckboxField label="Burn in title & captions" checked={burnCaptions} onChange={setBurnCaptions} />
-            </div>
-            <div>
-              <CheckboxField
-                label="Auto-post every clip to TikTok"
-                checked={autoPostToTikTok}
-                onChange={setAutoPostToTikTok}
-                disabled={!tiktok.connected}
-              />
-              {!tiktok.connected && (
-                <p className="mt-1 text-xs text-neutral-500">Connect your TikTok account above to enable this.</p>
-              )}
-              {tiktok.connected && autoPostToTikTok && (
-                <p className="mt-1 text-xs text-neutral-500">
-                  Posts as private/self-only unless your TikTok app has passed review - see the README.
-                </p>
-              )}
             </div>
           </div>
         )}
@@ -285,7 +180,6 @@ export default function Home() {
                   Download
                 </a>
                 <CaptionBox text={clip.socialCaption} />
-                {tiktokStatuses[i] && <TikTokStatusBadge status={tiktokStatuses[i]} />}
               </div>
             ))}
           </div>
@@ -293,16 +187,6 @@ export default function Home() {
       )}
     </main>
   );
-}
-
-function TikTokStatusBadge({ status }: { status: TikTokClipStatus }) {
-  const styles =
-    status.status === "posted"
-      ? "border-green-900 bg-green-950/50 text-green-300"
-      : status.status === "error"
-        ? "border-red-900 bg-red-950/50 text-red-300"
-        : "border-neutral-700 bg-neutral-900 text-neutral-300";
-  return <div className={`rounded-lg border p-2 text-xs ${styles}`}>{status.message}</div>;
 }
 
 function CaptionBox({ text }: { text: string }) {
@@ -342,19 +226,16 @@ function CheckboxField({
   label,
   checked,
   onChange,
-  disabled,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
-  disabled?: boolean;
 }) {
   return (
-    <label className={`flex items-center gap-2 text-sm text-neutral-300 ${disabled ? "opacity-50" : ""}`}>
+    <label className="flex items-center gap-2 text-sm text-neutral-300">
       <input
         type="checkbox"
         checked={checked}
-        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         className="h-4 w-4 rounded border-neutral-700 bg-neutral-950 accent-white"
       />
