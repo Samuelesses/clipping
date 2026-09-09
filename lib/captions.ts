@@ -2,7 +2,6 @@ import fs from "fs/promises";
 import path from "path";
 import { run } from "./exec";
 import type { TranscriptSegment, TranscriptWord } from "./types";
-import { cookieArgs } from "./ytdlp";
 
 /**
  * Tries to grab YouTube's own subtitles (manually uploaded or auto-generated) via
@@ -23,7 +22,6 @@ export async function fetchCaptions(url: string, workDir: string): Promise<Trans
       "--sub-format",
       "vtt",
       "--no-playlist",
-      ...cookieArgs(),
       "-o",
       outputTemplate,
       url,
