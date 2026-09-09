@@ -3,6 +3,24 @@ import path from "path";
 import { checkDependency, run } from "./exec";
 import type { VideoInfo } from "./types";
 
+/**
+ * Cookie args to pass to yt-dlp, if configured. YouTube sometimes requires a signed-in
+ * session to serve a video at all (age/region gating, or a bot check on some IPs) - see
+ * lib/exec.ts's YOUTUBE_BOT_CHECK_RE handling for the error message pointing here.
+ * YTDLP_COOKIES_FILE (a cookies.txt export) takes precedence over
+ * YTDLP_COOKIES_FROM_BROWSER (read live from an installed browser's profile) since it's
+ * the more explicit/reliable of the two.
+ */
+export function cookieArgs(): string[] {
+  const cookiesFile = process.env.YTDLP_COOKIES_FILE;
+  if (cookiesFile) return ["--cookies", cookiesFile];
+
+  const cookiesFromBrowser = process.env.YTDLP_COOKIES_FROM_BROWSER;
+  if (cookiesFromBrowser) return ["--cookies-from-browser", cookiesFromBrowser];
+
+  return [];
+}
+
 export async function checkDependencies(): Promise<void> {
   await checkDependency(
     "yt-dlp",
@@ -17,7 +35,7 @@ export async function checkDependencies(): Promise<void> {
 }
 
 export async function getVideoInfo(url: string): Promise<VideoInfo> {
-  const stdout = await run("yt-dlp", ["-J", "--no-playlist", url]);
+  const stdout = await run("yt-dlp", ["-J", "--no-playlist", ...cookieArgs(), url]);
   const data = JSON.parse(stdout);
   const title = typeof data.title === "string" ? data.title : "Untitled video";
   const duration = typeof data.duration === "number" ? data.duration : 0;
@@ -35,6 +53,7 @@ export async function downloadVideo(url: string, workDir: string): Promise<strin
     "--merge-output-format",
     "mp4",
     "--no-playlist",
+    ...cookieArgs(),
     "-o",
     outputTemplate,
     url,

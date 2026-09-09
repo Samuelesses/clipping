@@ -97,9 +97,22 @@ All configuration lives in `.env.local` (see `.env.example`):
 |---|---|---|
 | `OPENAI_API_KEY` | yes | Used for Whisper transcription (fallback) and highlight selection. |
 | `OPENAI_MODEL` | no | Overrides the model used to pick highlights (default `gpt-5.1`). |
+| `YTDLP_COOKIES_FROM_BROWSER` | no | Browser to read a live YouTube session from (e.g. `chrome`, `firefox`) - see below. |
+| `YTDLP_COOKIES_FILE` | no | Path to a `cookies.txt` export instead - takes precedence if both are set. |
 
 You can also tune, per request, from the "advanced options" in the UI: how many clips to
 generate, and the min/max length of each clip.
+
+### If yt-dlp fails with "Sign in to confirm you're not a bot"
+
+This is YouTube challenging yt-dlp, not this app - it happens especially often from a
+server/VM IP, but can happen on any connection depending on the video. Fix it by pointing
+yt-dlp at a real, signed-in YouTube session: set `YTDLP_COOKIES_FROM_BROWSER` in
+`.env.local` to a browser you're logged into YouTube with (`chrome`, `firefox`, `edge`,
+`safari`, etc.), or export a `cookies.txt` from your browser and set `YTDLP_COOKIES_FILE`
+to its path (see yt-dlp's
+[cookies FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp)).
+Restart `npm run dev` after changing either.
 
 ## Cost
 
