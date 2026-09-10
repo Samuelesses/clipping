@@ -516,6 +516,18 @@ function StatusBadge({ status }: { status: ProjectState["status"] }) {
 
 function ClipRow({ clip }: { clip: GeneratedClip }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(clip.socialCaption);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API can be unavailable (e.g. insecure context) - fail silently, the
+      // caption is still copyable by hand from the expanded details below.
+    }
+  }
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-3">
@@ -531,6 +543,13 @@ function ClipRow({ clip }: { clip: GeneratedClip }) {
           <p className="truncate text-sm text-neutral-400">{clip.reason}</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+          >
+            {copied ? "Copied!" : "Copy caption"}
+          </button>
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
