@@ -480,7 +480,9 @@ export default function Home() {
                     src={clip.url}
                     className="mx-auto max-h-[70vh] w-auto max-w-full rounded-lg bg-black"
                   />
-                  <h3 className="font-medium">{clip.title}</h3>
+                  <h3 className="font-medium">
+                    <span className="text-neutral-500">{i + 1}.</span> {clip.title}
+                  </h3>
                   <p className="text-sm text-neutral-400">{clip.reason}</p>
                   <a href={clip.url} download className="inline-block text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
                     Download
@@ -492,7 +494,7 @@ export default function Home() {
           ) : (
             <div className="space-y-3">
               {clips.map((clip, i) => (
-                <ClipRow key={i} clip={clip} />
+                <ClipRow key={i} clip={clip} number={i + 1} />
               ))}
             </div>
           )}
@@ -514,7 +516,7 @@ function StatusBadge({ status }: { status: ProjectState["status"] }) {
   return <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-xs ${styles}`}>{status}</span>;
 }
 
-function ClipRow({ clip }: { clip: GeneratedClip }) {
+function ClipRow({ clip, number }: { clip: GeneratedClip; number: number }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -539,7 +541,9 @@ function ClipRow({ clip }: { clip: GeneratedClip }) {
           className="h-24 w-auto flex-shrink-0 rounded-md bg-black"
         />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-medium">{clip.title}</h3>
+          <h3 className="truncate font-medium">
+            <span className="text-neutral-500">{number}.</span> {clip.title}
+          </h3>
           <p className="truncate text-sm text-neutral-400">{clip.reason}</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-3">
