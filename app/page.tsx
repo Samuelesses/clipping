@@ -480,9 +480,16 @@ export default function Home() {
                     src={clip.url}
                     className="mx-auto max-h-[70vh] w-auto max-w-full rounded-lg bg-black"
                   />
-                  <h3 className="font-medium">
-                    <span className="text-neutral-500">{i + 1}.</span> {clip.title}
-                  </h3>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-medium">
+                      <span className="text-neutral-500">{i + 1}.</span> {clip.title}
+                    </h3>
+                    <CopyButton
+                      text={clip.title}
+                      label="Copy title"
+                      className="flex-shrink-0 text-xs text-blue-400 underline underline-offset-2 hover:text-blue-300"
+                    />
+                  </div>
                   <p className="text-sm text-neutral-400">{clip.reason}</p>
                   <a href={clip.url} download className="inline-block text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
                     Download
@@ -518,18 +525,6 @@ function StatusBadge({ status }: { status: ProjectState["status"] }) {
 
 function ClipRow({ clip, number }: { clip: GeneratedClip; number: number }) {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(clip.socialCaption);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard API can be unavailable (e.g. insecure context) - fail silently, the
-      // caption is still copyable by hand from the expanded details below.
-    }
-  }
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-3">
@@ -547,13 +542,16 @@ function ClipRow({ clip, number }: { clip: GeneratedClip; number: number }) {
           <p className="truncate text-sm text-neutral-400">{clip.reason}</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={handleCopy}
+          <CopyButton
+            text={clip.title}
+            label="Copy title"
             className="text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
-          >
-            {copied ? "Copied!" : "Copy caption"}
-          </button>
+          />
+          <CopyButton
+            text={clip.socialCaption}
+            label="Copy caption"
+            className="text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+          />
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
@@ -580,7 +578,8 @@ function ClipRow({ clip, number }: { clip: GeneratedClip; number: number }) {
   );
 }
 
-function CaptionBox({ text }: { text: string }) {
+/** A button that copies fixed text to the clipboard, showing "Copied!" briefly after. */
+function CopyButton({ text, label, className }: { text: string; label: string; className: string }) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -590,23 +589,29 @@ function CaptionBox({ text }: { text: string }) {
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // Clipboard API can be unavailable (e.g. insecure context) - fail silently,
-      // the text is still selectable/copyable by hand from the box below.
+      // the text is still selectable/copyable by hand from wherever it's shown.
     }
   }
 
+  return (
+    <button type="button" onClick={handleCopy} className={className}>
+      {copied ? "Copied!" : label}
+    </button>
+  );
+}
+
+function CaptionBox({ text }: { text: string }) {
   return (
     <div className="space-y-1.5 rounded-lg border border-neutral-800 bg-neutral-950 p-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
           Caption &amp; hashtags
         </span>
-        <button
-          type="button"
-          onClick={handleCopy}
+        <CopyButton
+          text={text}
+          label="Copy"
           className="text-xs text-blue-400 underline underline-offset-2 hover:text-blue-300"
-        >
-          {copied ? "Copied!" : "Copy"}
-        </button>
+        />
       </div>
       <p className="whitespace-pre-wrap text-sm text-neutral-300">{text}</p>
     </div>
