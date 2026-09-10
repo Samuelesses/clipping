@@ -1,15 +1,22 @@
 import fs from "fs/promises";
+import { existsSync } from "fs";
 import path from "path";
 import { checkDependency, run } from "./exec";
 import type { VideoInfo } from "./types";
+
+// The simplest way to fix YouTube's bot check: just drop a cookies.txt exported from
+// your browser (e.g. via the "Get cookies.txt LOCALLY" extension) into the project root
+// - no .env.local editing needed. Checked for on every call so it starts working as
+// soon as the file appears, without restarting the dev server.
+const DEFAULT_COOKIES_FILE = path.join(process.cwd(), "cookies.txt");
 
 /**
  * Cookie args to pass to yt-dlp, if configured. YouTube sometimes requires a signed-in
  * session to serve a video at all (age/region gating, or a bot check on some IPs) - see
  * lib/exec.ts's YOUTUBE_BOT_CHECK_RE handling for the error message pointing here.
- * YTDLP_COOKIES_FILE (a cookies.txt export) takes precedence over
- * YTDLP_COOKIES_FROM_BROWSER (read live from an installed browser's profile) since it's
- * the more explicit/reliable of the two.
+ * Checked in order: an explicit YTDLP_COOKIES_FILE, then YTDLP_COOKIES_FROM_BROWSER
+ * (read live from an installed browser's profile), then a cookies.txt auto-detected in
+ * the project root.
  */
 export function cookieArgs(): string[] {
   const cookiesFile = process.env.YTDLP_COOKIES_FILE;
@@ -17,6 +24,8 @@ export function cookieArgs(): string[] {
 
   const cookiesFromBrowser = process.env.YTDLP_COOKIES_FROM_BROWSER;
   if (cookiesFromBrowser) return ["--cookies-from-browser", cookiesFromBrowser];
+
+  if (existsSync(DEFAULT_COOKIES_FILE)) return ["--cookies", DEFAULT_COOKIES_FILE];
 
   return [];
 }

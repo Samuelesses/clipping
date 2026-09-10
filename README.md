@@ -97,8 +97,8 @@ All configuration lives in `.env.local` (see `.env.example`):
 |---|---|---|
 | `OPENAI_API_KEY` | yes | Used for Whisper transcription (fallback) and highlight selection. |
 | `OPENAI_MODEL` | no | Overrides the model used to pick highlights (default `gpt-5.1`). |
-| `YTDLP_COOKIES_FROM_BROWSER` | no | Browser to read a live YouTube session from (e.g. `chrome`, `firefox`) - see below. |
-| `YTDLP_COOKIES_FILE` | no | Path to a `cookies.txt` export instead - takes precedence if both are set. |
+| `YTDLP_COOKIES_FILE` | no | Non-default path to a `cookies.txt` export - see below. |
+| `YTDLP_COOKIES_FROM_BROWSER` | no | Read cookies live from an installed browser instead (e.g. `chrome`) - see below. |
 
 You can also tune, per request, from the "advanced options" in the UI: how many clips to
 generate, and the min/max length of each clip.
@@ -106,13 +106,29 @@ generate, and the min/max length of each clip.
 ### If yt-dlp fails with "Sign in to confirm you're not a bot"
 
 This is YouTube challenging yt-dlp, not this app - it happens especially often from a
-server/VM IP, but can happen on any connection depending on the video. Fix it by pointing
-yt-dlp at a real, signed-in YouTube session: set `YTDLP_COOKIES_FROM_BROWSER` in
-`.env.local` to a browser you're logged into YouTube with (`chrome`, `firefox`, `edge`,
-`safari`, etc.), or export a `cookies.txt` from your browser and set `YTDLP_COOKIES_FILE`
-to its path (see yt-dlp's
-[cookies FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp)).
-Restart `npm run dev` after changing either.
+server/VM IP, but can happen on any connection depending on the video. Fix it with cookies
+from a browser you're logged into YouTube with, so yt-dlp looks like a real signed-in
+session:
+
+1. Install a "cookies.txt export" browser extension - e.g.
+   [Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+   for Chrome/Edge/Brave, or [cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/)
+   for Firefox.
+2. Go to youtube.com while logged in, click the extension, and export/save the file as
+   `cookies.txt`.
+3. Drop that file at the **root of this project** (next to `package.json`), named exactly
+   `cookies.txt`. It's picked up automatically - no env var or restart needed - and it's
+   already in `.gitignore` so it can't get committed by accident.
+
+If your cookies file lives somewhere else, or you'd rather have yt-dlp read cookies live
+from an installed browser's profile instead of a file, set `YTDLP_COOKIES_FILE` or
+`YTDLP_COOKIES_FROM_BROWSER` in `.env.local` (see `.env.example`) and restart `npm run dev`
+- either one takes precedence over an auto-detected `cookies.txt`. See yt-dlp's
+[cookies FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp)
+for more detail.
+
+YouTube sessions expire eventually - if the bot check comes back after a while, just
+re-export a fresh `cookies.txt` the same way.
 
 ## Cost
 
