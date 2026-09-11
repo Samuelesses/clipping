@@ -261,11 +261,12 @@ export async function regenerateClip(
     const clipsDir = path.join(PUBLIC_CLIPS_DIR, jobId);
     await fs.mkdir(clipsDir, { recursive: true });
     const fileName = path.basename(clip.url.split("?")[0]);
-    const tmpOutPath = path.join(clipsDir, `.regen-${fileName}`);
     const finalOutPath = path.join(clipsDir, fileName);
 
-    await cutClip(videoPath, tmpOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath });
-    await fs.rename(tmpOutPath, finalOutPath);
+    // cutClip itself writes to a local temp path and moves the finished file into place
+    // (see lib/ffmpeg.ts), so this overwrites finalOutPath atomically with no partial
+    // reads and no separate tmp/rename dance needed here.
+    await cutClip(videoPath, finalOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath });
 
     // Cache-bust: the URL path is unchanged (same file), but browsers cache video
     // responses aggressively - a changing query string forces a reload of the new cut.

@@ -183,6 +183,12 @@ Downloading and cutting video with `yt-dlp`/`ffmpeg` is free (just your own comp
   and transcription time too when Whisper is needed).
 - Clips are re-encoded with `ffmpeg` (not stream-copied) so cut points land exactly on the
   timestamps the model picked, at the cost of a bit of processing time per clip.
+- If this project's folder lives under a cloud-synced directory (e.g. `~/Documents` with iCloud
+  Drive syncing enabled on macOS - a common default), that's fine: every clip is fully rendered in
+  a local system temp directory first and only moved into `public/clips/` once finished, so the
+  sync daemon can't interfere mid-write. (Earlier versions wrote directly into the synced folder,
+  which could intermittently corrupt a clip with an "Unable to re-open ... for shifting data"
+  ffmpeg error - if you still hit that, update to the latest version.)
 - Burned-in captions require `ffmpeg` built with `libass` (the standard Homebrew/apt builds are).
   By default they're generated at whatever granularity the transcript source provides
   (per-sentence/phrase from captions or Whisper segments); turn on "animated word-by-word
