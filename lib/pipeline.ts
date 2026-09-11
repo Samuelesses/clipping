@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { fetchCaptions } from "./captions";
-import { cutClip, extractAudio, getVideoDimensions, supportsBurnedCaptions } from "./ffmpeg";
+import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
 import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle } from "./projects";
 import { withRetry } from "./retry";
@@ -177,12 +177,21 @@ export async function ensureVideoDownloaded(
   const cacheDir = cacheDirFor(url);
   await fs.mkdir(cacheDir, { recursive: true });
 
-  const existing = (await fs.readdir(cacheDir).catch(() => [] as string[])).find(
+  const candidates = (await fs.readdir(cacheDir).catch(() => [] as string[])).filter(
     (f) => f.startsWith("source.") && !f.endsWith(".part") && !f.endsWith(".ytdl"),
   );
-  if (existing) {
-    await log("This video was already downloaded previously - reusing it instead of re-downloading.");
-    return path.join(cacheDir, existing);
+  // Verify by content, not just filename/presence - a stale cache entry from a run where
+  // yt-dlp left video and audio unmerged (see lib/ytdlp.ts's resolveDownloadedFile) could
+  // otherwise get "reused" as a video file that actually has no video stream.
+  for (const f of candidates) {
+    const full = path.join(cacheDir, f);
+    if (await hasVideoStream(full)) {
+      await log("This video was already downloaded previously - reusing it instead of re-downloading.");
+      return full;
+    }
+  }
+  if (candidates.length > 0) {
+    await Promise.all(candidates.map((f) => fs.rm(path.join(cacheDir, f), { force: true })));
   }
 
   await log(`Downloading "${info.title}"...`);

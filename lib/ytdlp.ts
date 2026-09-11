@@ -1,7 +1,8 @@
 import fs from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { checkDependency, run } from "./exec";
+import { checkDependency, resolveExecutablePath, run } from "./exec";
+import { hasAudioStream, hasVideoStream, muxVideoAudio } from "./ffmpeg";
 import type { VideoInfo } from "./types";
 
 // The simplest way to fix YouTube's bot check: just drop a cookies.txt exported from
@@ -63,6 +64,12 @@ export async function downloadVideo(
 ): Promise<string> {
   const outputTemplate = path.join(workDir, "source.%(ext)s");
 
+  // yt-dlp does its own search for ffmpeg to merge separately-downloaded video and
+  // audio into one file, and that search can fail even when ffmpeg is perfectly
+  // reachable on PATH for this process (common for GUI-launched dev servers with a
+  // trimmed PATH) - being explicit here means merging isn't left to chance.
+  const ffmpegPath = await resolveExecutablePath("ffmpeg");
+
   // yt-dlp normally overwrites its progress line in place with carriage returns;
   // --newline makes it print one line per update instead, which is what makes parsing
   // it out of a stdout stream straightforward. Lines can still arrive split across
@@ -77,6 +84,7 @@ export async function downloadVideo(
       "mp4",
       "--no-playlist",
       "--newline",
+      ...(ffmpegPath ? ["--ffmpeg-location", ffmpegPath] : []),
       ...cookieArgs(),
       "-o",
       outputTemplate,
@@ -96,10 +104,57 @@ export async function downloadVideo(
     },
   );
 
-  const files = await fs.readdir(workDir);
-  const video = files.find((f) => f.startsWith("source."));
-  if (!video) {
+  return resolveDownloadedFile(workDir);
+}
+
+/**
+ * Picks out the file yt-dlp just downloaded to workDir. Usually there's exactly one
+ * ("source.mp4") - yt-dlp merged video+audio as asked. But if merging failed for any
+ * reason (its own ffmpeg detection, a codec mismatch, etc.) it silently leaves the
+ * separate video-only and audio-only streams instead, each suffixed with a format id
+ * (e.g. "source.f137.mp4" + "source.f251.webm") - picking either one alone by name is
+ * wrong (naively grabbing "whichever file exists" can and did pick the audio-only file,
+ * producing an unplayable-as-video output). Detect that case by content (via ffprobe,
+ * not filename) and mux them into a proper merged file instead of guessing.
+ */
+export async function resolveDownloadedFile(workDir: string): Promise<string> {
+  const files = (await fs.readdir(workDir)).filter(
+    (f) => f.startsWith("source.") && !f.endsWith(".part") && !f.endsWith(".ytdl"),
+  );
+  if (files.length === 0) {
     throw new Error("yt-dlp finished but no output file was found in the working directory.");
   }
-  return path.join(workDir, video);
+  if (files.length === 1) {
+    return path.join(workDir, files[0]);
+  }
+
+  const candidates = await Promise.all(
+    files.map(async (f) => {
+      const full = path.join(workDir, f);
+      const [video, audio] = await Promise.all([hasVideoStream(full), hasAudioStream(full)]);
+      return { path: full, video, audio };
+    }),
+  );
+
+  const alreadyMerged = candidates.find((c) => c.video && c.audio);
+  if (alreadyMerged) {
+    return alreadyMerged.path;
+  }
+
+  const videoOnly = candidates.find((c) => c.video && !c.audio);
+  const audioOnly = candidates.find((c) => c.audio && !c.video);
+  if (videoOnly && audioOnly) {
+    const mergedPath = path.join(workDir, "source.merged.mp4");
+    await muxVideoAudio(videoOnly.path, audioOnly.path, mergedPath);
+    await Promise.all(files.map((f) => fs.rm(path.join(workDir, f), { force: true })));
+    const finalPath = path.join(workDir, "source.mp4");
+    await fs.rename(mergedPath, finalPath);
+    return finalPath;
+  }
+
+  throw new Error(
+    "yt-dlp downloaded multiple files but none of them is a usable merged video - " +
+      `found: ${files.join(", ")}. This usually means yt-dlp couldn't find ffmpeg to merge ` +
+      "separately-downloaded video and audio streams; make sure ffmpeg is on your PATH.",
+  );
 }

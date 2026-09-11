@@ -71,3 +71,24 @@ export async function checkDependency(command: string, versionFlag: string, inst
     throw new Error(`Required tool "${command}" was not found on your PATH. ${installHint}`);
   }
 }
+
+/**
+ * Resolves the absolute path to a command on PATH, or null if it can't be found. Used to
+ * hand yt-dlp an explicit --ffmpeg-location: yt-dlp does its own (occasionally
+ * unreliable, especially for GUI-launched processes with a trimmed PATH) search for
+ * ffmpeg, and when that fails it silently leaves video+audio unmerged instead of
+ * erroring - being explicit avoids relying on yt-dlp's own detection working.
+ */
+export async function resolveExecutablePath(command: string): Promise<string | null> {
+  try {
+    const finder = process.platform === "win32" ? "where" : "which";
+    const { stdout } = await execFileAsync(finder, [command]);
+    const first = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    return first ?? null;
+  } catch {
+    return null;
+  }
+}

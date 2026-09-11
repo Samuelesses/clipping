@@ -72,6 +72,53 @@ export async function getVideoDimensions(videoPath: string): Promise<{ width: nu
   return { width, height };
 }
 
+async function hasStreamType(mediaPath: string, streamType: "v" | "a"): Promise<boolean> {
+  try {
+    const stdout = await run("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      streamType,
+      "-show_entries",
+      "stream=index",
+      "-of",
+      "csv=p=0",
+      mediaPath,
+    ]);
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function hasVideoStream(mediaPath: string): Promise<boolean> {
+  return hasStreamType(mediaPath, "v");
+}
+
+export function hasAudioStream(mediaPath: string): Promise<boolean> {
+  return hasStreamType(mediaPath, "a");
+}
+
+/** Muxes a separate video-only and audio-only file into one, without re-encoding. */
+export async function muxVideoAudio(videoPath: string, audioPath: string, outputPath: string): Promise<void> {
+  await run("ffmpeg", [
+    "-y",
+    "-i",
+    videoPath,
+    "-i",
+    audioPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c",
+    "copy",
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ]);
+}
+
 export interface AudioChunk {
   path: string;
   offsetSeconds: number;
