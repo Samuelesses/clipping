@@ -68,13 +68,16 @@ export async function findHighlights(
           "Each clip must make sense without any extra context and should isolate a single moment rather " +
           "than spanning several unrelated topics. Choose start/end times that land on natural speech " +
           "boundaries - start right as a sentence/thought begins (never mid-sentence or mid-word) and end " +
-          "right after a sentence/thought completes, so the clip doesn't feel cut off. Clip length is a " +
-          "target, not a hard limit: it's fine to run somewhat longer to include the full setup and " +
-          "payoff of a joke or story - but never more than 50% over the requested maximum, and never " +
-          "under the requested minimum. If a moment is naturally brief, extend the clip to include " +
-          "surrounding context (reaction, follow-up, related back-and-forth) rather than submitting a " +
-          "clip shorter than the minimum. A complete, satisfying moment within that range matters more " +
-          "than hitting an exact duration. Scan the ENTIRE transcript from start to finish and pick clips spread across " +
+          "right after a sentence/thought completes, so the clip doesn't feel cut off. The requested " +
+          "maximum is a real ceiling, not a loose target: aim to land AT OR UNDER it, and only go over " +
+          "by the few seconds truly needed to finish the current sentence or payoff - a couple seconds " +
+          "over is normal, going tens of seconds or 50% over is not and must not happen routinely. The " +
+          "requested minimum works the other direction: never come in under it - if a moment is " +
+          "naturally brief, extend the clip to include surrounding context (reaction, follow-up, related " +
+          "back-and-forth) rather than submitting something shorter than the minimum. Within " +
+          "[minimum, maximum], shorter is completely fine whenever the moment itself is naturally short - " +
+          "a complete, satisfying moment matters more than hitting an exact duration, but that means using " +
+          "the room between min and max as needed, not defaulting to the maximum every time. Scan the ENTIRE transcript from start to finish and pick clips spread across " +
           "different moments/timestamps - never pick two clips covering the same or overlapping moment, " +
           "and don't cluster every pick in one section unless the rest of the video genuinely has nothing " +
           "else worth clipping. Aim for variety across the categories above rather than several of the " +
@@ -87,9 +90,10 @@ export async function findHighlights(
           `Video duration: ${formatTime(info.duration)} (${Math.round(info.duration)} seconds)\n\n` +
           `Transcript with timestamps:\n${transcript}\n\n` +
           `Pick ${requestCount} of the best, most engaging, self-contained moments to turn into clips, ` +
-          `drawn from different parts of the video. Aim for roughly ${options.minClipSeconds}-` +
-          `${options.maxClipSeconds} seconds each as a target, but go shorter or longer when the moment ` +
-          `itself calls for it - never cut off a setup or payoff early just to fit the target. ` +
+          `drawn from different parts of the video. Each clip must be between ${options.minClipSeconds} and ` +
+          `${options.maxClipSeconds} seconds - go shorter within that range whenever the moment itself is ` +
+          `naturally brief, and treat ${options.maxClipSeconds}s as a hard ceiling you only exceed by a few ` +
+          `seconds when truly necessary to avoid cutting off a setup or payoff mid-sentence. ` +
           `Start and end times must be given in seconds, fall within [0, ${Math.round(info.duration)}], and ` +
           `clips must not overlap each other. For each clip also write a ready-to-post social caption with ` +
           `hashtags (see schema). Order the clips from best to worst.`,
@@ -154,13 +158,16 @@ export function enforceMinDuration(
   return { ...clip, end: newEnd };
 }
 
-// The prompt asks the model to stay within ~50% of the requested max, but models don't
+// The prompt asks the model to treat the max as a near-hard ceiling, but models don't
 // always follow numeric limits reliably - enforce it in code too so "max length" is a
-// real ceiling, not just a suggestion. Trims the end back to the nearest transcript
-// segment boundary at or before the cap so the clip still ends cleanly, rather than a
-// hard mid-sentence cut.
+// real ceiling, not just a suggestion. The allowed overrun is deliberately small (just
+// enough to finish a sentence/payoff, not a routine target) and scales down in relative
+// terms for longer max lengths, where a big proportional overrun would be a lot of extra
+// seconds: whichever is smaller of +25% or +20s flat. Trims the end back to the nearest
+// transcript segment boundary at or before the cap so the clip still ends cleanly,
+// rather than a hard mid-sentence cut.
 export function capDuration(clip: HighlightClip, segments: TranscriptSegment[], maxClipSeconds: number): HighlightClip {
-  const hardCapSeconds = maxClipSeconds * 1.5;
+  const hardCapSeconds = maxClipSeconds + Math.min(20, maxClipSeconds * 0.25);
   if (clip.end - clip.start <= hardCapSeconds) return clip;
 
   const cappedEnd = clip.start + hardCapSeconds;
