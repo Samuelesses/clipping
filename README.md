@@ -43,6 +43,11 @@ Clips can be browsed as a grid (with inline previews) or a compact list, and dow
 time or all together as a single ZIP - handy since TikTok's uploader lets you select up to 30
 videos at once from a folder.
 
+**If one clip came out wrong** (bad reframe, missing captions, whatever), **Regenerate this
+clip** on it re-renders just that one - same moment, title, and caption, untouched - with
+whatever reframe/caption settings you pick for that attempt, without re-picking highlights or
+touching any other clip.
+
 Paste multiple URLs (one per line) to batch-process several videos at once - each becomes its
 own project, run through a small concurrency-limited queue (2 at a time) so batches don't
 overwhelm your machine or hit API rate limits.

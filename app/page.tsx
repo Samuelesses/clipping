@@ -5,6 +5,15 @@ import type { GeneratedClip, HighlightClip, ProjectState, ReframeStyle } from "@
 
 type ViewMode = "grid" | "list";
 
+interface RegenerateDefaults {
+  vertical: boolean;
+  reframeStyle: ReframeStyle;
+  burnCaptions: boolean;
+  animatedCaptions: boolean;
+}
+
+type RegenerateOverrides = Partial<RegenerateDefaults>;
+
 const ACTIVE_JOB_KEY = "clipping.activeJobId";
 const POLL_INTERVAL_MS = 1500;
 
@@ -185,6 +194,26 @@ export default function Home() {
 
   function removeDraft(index: number) {
     setReviewDrafts((drafts) => drafts.filter((_, i) => i !== index));
+  }
+
+  /** Re-renders one clip in place - same moment/title/caption, just re-cut (optionally
+   * with different reframe/caption settings) - and swaps it into the current project's
+   * clips array once done. */
+  async function handleRegenerateClip(index: number, overrides: RegenerateOverrides) {
+    if (!project) return;
+    const res = await fetch(`/api/projects/${project.jobId}/clips/${index}/regenerate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(overrides),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not regenerate this clip.");
+    setProject((prev) => {
+      if (!prev) return prev;
+      const clips = prev.clips.slice();
+      clips[index] = data.clip;
+      return { ...prev, clips };
+    });
   }
 
   async function handleApproveCut(jobId: string) {
@@ -552,17 +581,26 @@ export default function Home() {
                     />
                   </div>
                   <p className="text-sm text-neutral-400">{clip.reason}</p>
-                  <a href={clip.url} download className="inline-block text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
-                    Download
-                  </a>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a href={clip.url} download className="text-sm text-blue-400 underline underline-offset-2 hover:text-blue-300">
+                      Download
+                    </a>
+                  </div>
                   <CaptionBox text={clip.socialCaption} />
+                  <RegeneratePanel defaultOptions={project!.options} onRegenerate={(overrides) => handleRegenerateClip(i, overrides)} />
                 </div>
               ))}
             </div>
           ) : (
             <div className="space-y-3">
               {clips.map((clip, i) => (
-                <ClipRow key={i} clip={clip} number={i + 1} />
+                <ClipRow
+                  key={i}
+                  clip={clip}
+                  number={i + 1}
+                  defaultOptions={project!.options}
+                  onRegenerate={(overrides) => handleRegenerateClip(i, overrides)}
+                />
               ))}
             </div>
           )}
@@ -602,7 +640,17 @@ function StatusBadge({ status }: { status: ProjectState["status"] }) {
   return <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-xs ${styles}`}>{status}</span>;
 }
 
-function ClipRow({ clip, number }: { clip: GeneratedClip; number: number }) {
+function ClipRow({
+  clip,
+  number,
+  defaultOptions,
+  onRegenerate,
+}: {
+  clip: GeneratedClip;
+  number: number;
+  defaultOptions: RegenerateDefaults;
+  onRegenerate: (overrides: RegenerateOverrides) => Promise<void>;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -651,8 +699,95 @@ function ClipRow({ clip, number }: { clip: GeneratedClip; number: number }) {
         <div className="mt-3 space-y-3 border-t border-neutral-800 pt-3">
           <video controls preload="metadata" src={clip.url} className="mx-auto max-h-[60vh] w-auto max-w-full rounded-lg bg-black" />
           <CaptionBox text={clip.socialCaption} />
+          <RegeneratePanel defaultOptions={defaultOptions} onRegenerate={onRegenerate} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Lets you re-render one already-picked clip (same moment/title/caption, untouched) with
+ * different reframe/caption settings - for a clip that came out wrong, without
+ * re-running highlight selection or touching any other clip.
+ */
+function RegeneratePanel({
+  defaultOptions,
+  onRegenerate,
+}: {
+  defaultOptions: RegenerateDefaults;
+  onRegenerate: (overrides: RegenerateOverrides) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [vertical, setVertical] = useState(defaultOptions.vertical);
+  const [reframeStyle, setReframeStyle] = useState(defaultOptions.reframeStyle);
+  const [burnCaptions, setBurnCaptions] = useState(defaultOptions.burnCaptions);
+  const [animatedCaptions, setAnimatedCaptions] = useState(defaultOptions.animatedCaptions);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+      >
+        Regenerate this clip
+      </button>
+    );
+  }
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onRegenerate({ vertical, reframeStyle, burnCaptions, animatedCaptions });
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not regenerate this clip.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-neutral-800 bg-neutral-950 p-3">
+      <p className="text-xs text-neutral-500">
+        Re-renders this exact moment (same start/end, title, caption) with different settings -
+        doesn't touch any other clip.
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
+        <CheckboxField label="Vertical 9:16" checked={vertical} onChange={setVertical} />
+        <CheckboxField label="Burn in captions" checked={burnCaptions} onChange={setBurnCaptions} />
+      </div>
+      {vertical && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
+          <RadioField label="Blur padding" checked={reframeStyle === "blur"} onChange={() => setReframeStyle("blur")} />
+          <RadioField label="Crop to fill" checked={reframeStyle === "crop"} onChange={() => setReframeStyle("crop")} />
+        </div>
+      )}
+      {burnCaptions && (
+        <CheckboxField label="Animated word-by-word captions" checked={animatedCaptions} onChange={setAnimatedCaptions} />
+      )}
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={submitting}
+          onClick={handleSubmit}
+          className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? "Regenerating..." : "Regenerate clip"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-sm text-neutral-500 underline underline-offset-2 hover:text-neutral-300"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

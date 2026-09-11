@@ -3,11 +3,11 @@ import path from "path";
 import { fetchCaptions } from "./captions";
 import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
-import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle } from "./projects";
+import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, updateClip } from "./projects";
 import { withRetry } from "./retry";
 import { writeClipAss } from "./subtitles";
 import { transcribeAudio } from "./transcribe";
-import type { HighlightClip, ProcessOptions, TranscriptSegment, VideoInfo } from "./types";
+import type { GeneratedClip, HighlightClip, ProcessOptions, ReframeStyle, TranscriptSegment, VideoInfo } from "./types";
 import { cacheDirFor } from "./videoCache";
 import { checkDependencies, downloadVideo, getVideoInfo } from "./ytdlp";
 
@@ -94,23 +94,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     const clipsDir = path.join(PUBLIC_CLIPS_DIR, jobId);
     await fs.mkdir(clipsDir, { recursive: true });
 
-    let captionCanvas: { width: number; height: number } | null = null;
-    // In vertical mode the sharp video is centered over a blurred fill, so we need to
-    // know where its bottom edge actually lands to anchor captions just under it
-    // rather than near the bottom of the whole padded canvas (see lib/subtitles.ts).
-    let videoBottomY: number | null = null;
-
-    if (burnCaptions) {
-      if (options.vertical) {
-        captionCanvas = { width: 1080, height: 1920 };
-        const sourceDims = await getVideoDimensions(videoPath);
-        const fgHeight = Math.round((captionCanvas.width * sourceDims.height) / sourceDims.width / 2) * 2;
-        const fgTop = Math.round((captionCanvas.height - fgHeight) / 2);
-        videoBottomY = fgTop + fgHeight;
-      } else {
-        captionCanvas = await getVideoDimensions(videoPath);
-      }
-    }
+    const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, options.vertical, burnCaptions);
 
     // Resume support: a prior attempt may have already cut and recorded some clips
     // before failing later on - pick up right after the last one.
@@ -163,6 +147,134 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
   // the generated clips themselves live in public/clips/<jobId>/ and are kept until
   // the user deletes the project.
   await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Works out the canvas burned-in captions render onto, and (in vertical mode, where
+ * the sharp video is centered over a blurred fill) where its bottom edge actually lands
+ * so captions can be anchored just under it instead of the bottom of the whole padded
+ * canvas - see lib/subtitles.ts. Shared by the main cutting loop and per-clip regenerate. */
+async function computeCaptionCanvas(
+  videoPath: string,
+  vertical: boolean,
+  burnCaptions: boolean,
+): Promise<{ captionCanvas: { width: number; height: number } | null; videoBottomY: number | null }> {
+  if (!burnCaptions) return { captionCanvas: null, videoBottomY: null };
+
+  if (vertical) {
+    const captionCanvas = { width: 1080, height: 1920 };
+    const sourceDims = await getVideoDimensions(videoPath);
+    const fgHeight = Math.round((captionCanvas.width * sourceDims.height) / sourceDims.width / 2) * 2;
+    const fgTop = Math.round((captionCanvas.height - fgHeight) / 2);
+    return { captionCanvas, videoBottomY: fgTop + fgHeight };
+  }
+
+  return { captionCanvas: await getVideoDimensions(videoPath), videoBottomY: null };
+}
+
+export interface ClipRenderOverrides {
+  vertical?: boolean;
+  reframeStyle?: ReframeStyle;
+  burnCaptions?: boolean;
+  animatedCaptions?: boolean;
+}
+
+/**
+ * Re-cuts a single already-selected clip - same start/end/title/reason/caption as
+ * before, just re-rendered (optionally with different reframe/caption settings). Uses
+ * the cached source video and transcript (see lib/videoCache.ts), so it works even for
+ * a project whose own working directory was already cleaned up after finishing - no
+ * re-download, re-transcription, or re-running highlight selection.
+ */
+export async function regenerateClip(
+  jobId: string,
+  clipIndex: number,
+  overrides: ClipRenderOverrides,
+): Promise<GeneratedClip> {
+  const project = await loadProject(jobId);
+  if (!project) throw new Error("Project not found.");
+  const clip = project.clips[clipIndex];
+  if (!clip) throw new Error("Clip not found.");
+
+  const vertical = overrides.vertical ?? project.options.vertical;
+  const reframeStyle = overrides.reframeStyle ?? project.options.reframeStyle;
+  const animatedCaptions = overrides.animatedCaptions ?? project.options.animatedCaptions;
+  let burnCaptions = overrides.burnCaptions ?? project.options.burnCaptions;
+  if (burnCaptions && !(await supportsBurnedCaptions())) {
+    burnCaptions = false;
+  }
+
+  const cacheDir = cacheDirFor(project.url);
+  const videoCandidates = (await fs.readdir(cacheDir).catch(() => [] as string[])).filter(
+    (f) => f.startsWith("source.") && !f.endsWith(".part") && !f.endsWith(".ytdl"),
+  );
+  let videoPath: string | null = null;
+  for (const f of videoCandidates) {
+    const full = path.join(cacheDir, f);
+    if (await hasVideoStream(full)) {
+      videoPath = full;
+      break;
+    }
+  }
+  if (!videoPath) {
+    throw new Error(
+      "The original downloaded video for this project is no longer available - use \"Generate more\" to " +
+        "re-download it instead of regenerating this one clip.",
+    );
+  }
+
+  let segments: TranscriptSegment[] = [];
+  if (burnCaptions) {
+    const raw = await fs.readFile(path.join(cacheDir, "transcript.json"), "utf8").catch(() => null);
+    if (!raw) {
+      throw new Error(
+        "The transcript for this project is no longer cached, so captions can't be burned in - try again " +
+          "with captions turned off, or use \"Generate more\" to redo the whole project.",
+      );
+    }
+    segments = JSON.parse(raw) as TranscriptSegment[];
+  }
+
+  // A scratch dir just for this one-off regenerate (the project's own workDir is long
+  // gone by the time a finished clip gets regenerated) - cleaned up right after.
+  const scratchDir = path.join(DATA_DIR, jobId, "regenerate-scratch");
+  await fs.mkdir(scratchDir, { recursive: true });
+
+  try {
+    const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, vertical, burnCaptions);
+
+    let subtitlesPath: string | undefined;
+    if (captionCanvas) {
+      subtitlesPath = path.join(scratchDir, "regen.ass");
+      await writeClipAss(
+        segments,
+        clip.start,
+        clip.end,
+        captionCanvas.width,
+        captionCanvas.height,
+        clip.title,
+        subtitlesPath,
+        videoBottomY,
+        animatedCaptions,
+      );
+    }
+
+    const clipsDir = path.join(PUBLIC_CLIPS_DIR, jobId);
+    await fs.mkdir(clipsDir, { recursive: true });
+    const fileName = path.basename(clip.url.split("?")[0]);
+    const tmpOutPath = path.join(clipsDir, `.regen-${fileName}`);
+    const finalOutPath = path.join(clipsDir, fileName);
+
+    await cutClip(videoPath, tmpOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath });
+    await fs.rename(tmpOutPath, finalOutPath);
+
+    // Cache-bust: the URL path is unchanged (same file), but browsers cache video
+    // responses aggressively - a changing query string forces a reload of the new cut.
+    const newUrl = `/clips/${jobId}/${fileName}?v=${Date.now()}`;
+    await updateClip(jobId, clipIndex, { url: newUrl });
+    return { ...clip, url: newUrl };
+  } finally {
+    await fs.rm(scratchDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 export async function ensureVideoDownloaded(

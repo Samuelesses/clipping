@@ -96,6 +96,14 @@ export async function addClip(jobId: string, clip: GeneratedClip): Promise<void>
   });
 }
 
+export async function updateClip(jobId: string, index: number, patch: Partial<GeneratedClip>): Promise<void> {
+  await updateProject(jobId, (state) => {
+    const clip = state.clips[index];
+    if (!clip) return;
+    Object.assign(clip, patch);
+  });
+}
+
 export async function setStatus(jobId: string, status: ProjectStatus, errorMessage?: string): Promise<void> {
   await updateProject(jobId, (state) => {
     state.status = status;
