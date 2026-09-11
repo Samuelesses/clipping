@@ -54,19 +54,48 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
   return { title, duration };
 }
 
-export async function downloadVideo(url: string, workDir: string): Promise<string> {
+const DOWNLOAD_PERCENT_RE = /\[download\]\s+(\d+(?:\.\d+)?)%/;
+
+export async function downloadVideo(
+  url: string,
+  workDir: string,
+  onProgress?: (percent: number) => void,
+): Promise<string> {
   const outputTemplate = path.join(workDir, "source.%(ext)s");
-  await run("yt-dlp", [
-    "-f",
-    "bv*[height<=1080]+ba/b[height<=1080]/b",
-    "--merge-output-format",
-    "mp4",
-    "--no-playlist",
-    ...cookieArgs(),
-    "-o",
-    outputTemplate,
-    url,
-  ]);
+
+  // yt-dlp normally overwrites its progress line in place with carriage returns;
+  // --newline makes it print one line per update instead, which is what makes parsing
+  // it out of a stdout stream straightforward. Lines can still arrive split across
+  // chunks, so buffer up to the last newline and only parse complete lines.
+  let buffer = "";
+  await run(
+    "yt-dlp",
+    [
+      "-f",
+      "bv*[height<=1080]+ba/b[height<=1080]/b",
+      "--merge-output-format",
+      "mp4",
+      "--no-playlist",
+      "--newline",
+      ...cookieArgs(),
+      "-o",
+      outputTemplate,
+      url,
+    ],
+    {
+      onStdout: (chunk) => {
+        if (!onProgress) return;
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const match = line.match(DOWNLOAD_PERCENT_RE);
+          if (match) onProgress(parseFloat(match[1]));
+        }
+      },
+    },
+  );
+
   const files = await fs.readdir(workDir);
   const video = files.find((f) => f.startsWith("source."));
   if (!video) {

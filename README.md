@@ -47,6 +47,12 @@ Paste multiple URLs (one per line) to batch-process several videos at once - eac
 own project, run through a small concurrency-limited queue (2 at a time) so batches don't
 overwhelm your machine or hit API rate limits.
 
+**Generate more clips, or re-run with different settings, without re-downloading.** The
+downloaded video and its transcript are cached per URL (independent of any one project) - so
+re-pasting a URL you've already processed, or clicking **Generate more** on a past project (which
+prefills the form with that project's URL and settings for you to tweak), skips straight to
+picking new highlights and cutting instead of re-downloading and re-transcribing.
+
 Everything runs locally as a single Next.js app (UI + API routes) - there's no server to
 deploy, no database, and no accounts. Only one API key is needed (OpenAI).
 
@@ -58,10 +64,13 @@ queue and start automatically as slots free up. That means:
 
 - **Closing the tab, a WiFi blip, or your laptop sleeping doesn't stop or lose the job.** Reopen
   the app and it picks the same project back up from wherever it got to.
-- **Every step is checkpointed to disk** (`data/<job-id>/`): the downloaded video, the
-  transcript, and the selected highlights are each saved as soon as they're ready. Network calls
-  (download, transcription, highlight selection) also auto-retry a few times with backoff before
-  giving up.
+- **Every step is checkpointed to disk**: the downloaded video and transcript are cached per URL
+  under `data/cache/<hash>/` (shared across projects - see "Generate more" above), and the
+  selected highlights are saved per project under `data/<job-id>/`. Network calls (download,
+  transcription, highlight selection) also auto-retry a few times with backoff before giving up.
+- **Live progress** for whatever's currently running - a percentage bar while downloading, chunk
+  count while transcribing a long video, and clip count while cutting - shown above the full log
+  (which stays tucked away behind a "Show full log" toggle unless you want to see everything).
 - **If a job does fail** (e.g. your internet actually dropped for a while), it shows up in the
   **Projects** list with a **Retry** button. Retrying reuses whatever was already
   downloaded/transcribed/selected instead of starting over from scratch - it only redoes the
@@ -151,11 +160,15 @@ Downloading and cutting video with `yt-dlp`/`ffmpeg` is free (just your own comp
 
 ## Notes & limitations
 
-- Downloaded source video and intermediate transcript/highlight checkpoints are written to
-  `data/<job-id>/` and kept until the job finishes successfully (or you delete the project) -
-  see "Progress is saved" above. Generated clips are kept in `public/clips/<job-id>/`, and the
-  project's own record lives in `data/projects/<job-id>.json`; deleting a project from the UI
-  removes all three.
+- The downloaded source video and its transcript live in `data/cache/<hash-of-url>/`, kept
+  indefinitely (even after deleting every project that used them) so the same URL never gets
+  re-downloaded or re-transcribed - see "Generate more" above. Per-project working files
+  (selected highlights, in-progress caption/audio files) live in `data/<job-id>/` and are cleaned
+  up once that project finishes successfully. Generated clips are kept in
+  `public/clips/<job-id>/`, and the project's own record lives in `data/projects/<job-id>.json`;
+  deleting a project from the UI removes those three but leaves the shared video/transcript cache
+  alone. Delete `data/cache/` by hand if you want to reclaim that disk space too (a future
+  "Generate more" on that URL will just re-download).
 - Only download content you have the right to use. Respect YouTube's and Twitch's Terms of
   Service - this tool is intended for personal use (e.g. clipping your own streams/videos, or
   ones you're otherwise permitted to download).
@@ -171,6 +184,5 @@ Downloading and cutting video with `yt-dlp`/`ffmpeg` is free (just your own comp
   captions" for the pop-per-word style instead, which needs word-level timestamps (available
   from Whisper, and from YouTube's auto-generated captions - manually-uploaded YouTube captions
   usually don't carry per-word timing, in which case that clip falls back to static captions).
-- A project awaiting review (`reviewing` status) keeps its downloaded video and transcript
-  checkpoint on disk until you approve or delete it - it isn't cleaned up until the clips are
-  actually cut.
+- A project awaiting review (`reviewing` status) keeps its per-project working files on disk
+  until you approve or delete it - it isn't cleaned up until the clips are actually cut.

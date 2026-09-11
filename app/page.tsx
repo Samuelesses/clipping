@@ -30,7 +30,9 @@ export default function Home() {
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [showLog, setShowLog] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
 
   useEffect(() => {
     refreshProjects();
@@ -159,6 +161,24 @@ export default function Home() {
     refreshProjects();
   }
 
+  /** Prefills the form from a past project's URL + settings so tweaking a setting and
+   * generating more/different clips reuses the video (and transcript) already fetched
+   * for that URL instead of starting from scratch - see lib/videoCache.ts. */
+  function handleReuseSettings(p: ProjectState) {
+    setUrlsText(p.url);
+    setClipCount(p.options.clipCount);
+    setMinClipSeconds(p.options.minClipSeconds);
+    setMaxClipSeconds(p.options.maxClipSeconds);
+    setVertical(p.options.vertical);
+    setReframeStyle(p.options.reframeStyle);
+    setBurnCaptions(p.options.burnCaptions);
+    setAnimatedCaptions(p.options.animatedCaptions);
+    setReviewBeforeCutting(p.options.reviewBeforeCutting);
+    setShowAdvanced(true);
+    setSubmitError(null);
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function updateDraft(index: number, patch: Partial<HighlightClip>) {
     setReviewDrafts((drafts) => drafts.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   }
@@ -201,11 +221,16 @@ export default function Home() {
         </p>
       </header>
 
-      <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+      <form ref={formRef} onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
         <div className="flex flex-col gap-2">
-          <label htmlFor="urls" className="text-sm font-medium text-neutral-300">
-            Video URL{urlCount > 1 ? "s" : ""} {urlCount > 1 && <span className="text-neutral-500">({urlCount})</span>}
-          </label>
+          <div className="flex items-baseline justify-between gap-2">
+            <label htmlFor="urls" className="text-sm font-medium text-neutral-300">
+              Video URL{urlCount > 1 ? "s" : ""} {urlCount > 1 && <span className="text-neutral-500">({urlCount})</span>}
+            </label>
+            <span className="text-xs text-neutral-500">
+              Re-pasting a URL you've already generated clips for reuses the download - no need to wait again.
+            </span>
+          </div>
           <textarea
             id="urls"
             required
@@ -317,6 +342,13 @@ export default function Home() {
                 )}
                 <button
                   type="button"
+                  onClick={() => handleReuseSettings(p)}
+                  className="text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+                >
+                  Generate more
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleDelete(p.jobId)}
                   className="text-neutral-500 underline underline-offset-2 hover:text-red-400"
                 >
@@ -331,13 +363,42 @@ export default function Home() {
       {project && (
         <>
           {project.log.length > 0 && (
-            <section className="space-y-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
-              <h2 className="text-sm font-medium text-neutral-300">Progress</h2>
-              <ul className="space-y-1 font-mono text-xs text-neutral-400">
-                {project.log.map((message, i) => (
-                  <li key={i}>{message}</li>
-                ))}
-              </ul>
+            <section className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-medium text-neutral-300">Progress</h2>
+                <StatusBadge status={project.status} />
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                {project.status === "running" && (
+                  <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-blue-400" />
+                )}
+                <p className="text-sm text-neutral-200">{project.log[project.log.length - 1]}</p>
+              </div>
+
+              {project.progress && (
+                <ProgressBar
+                  label={project.progress.label}
+                  current={project.progress.current}
+                  total={project.progress.total}
+                />
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowLog((v) => !v)}
+                className="text-xs text-neutral-500 underline underline-offset-2 hover:text-neutral-300"
+              >
+                {showLog ? "Hide full log" : "Show full log"}
+              </button>
+
+              {showLog && (
+                <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg bg-neutral-950 p-3 font-mono text-xs text-neutral-400">
+                  {project.log.map((message, i) => (
+                    <li key={i}>{message}</li>
+                  ))}
+                </ul>
+              )}
             </section>
           )}
 
@@ -508,6 +569,24 @@ export default function Home() {
         </section>
       )}
     </main>
+  );
+}
+
+function ProgressBar({ label, current, total }: { label: string; current: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((current / total) * 100))) : 0;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs text-neutral-500">
+        <span>{label}</span>
+        <span>{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
+        <div
+          className="h-full rounded-full bg-blue-400 transition-[width] duration-300 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
   );
 }
 

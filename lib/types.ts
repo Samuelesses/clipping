@@ -48,6 +48,16 @@ export interface ProcessOptions {
 
 export type ProjectStatus = "queued" | "running" | "reviewing" | "done" | "error";
 
+/** Fine-grained progress within the current pipeline stage (e.g. download percent, or
+ * clip N of M) - separate from the plain-text log, which is a history rather than a
+ * single "how far along is this" number. Cleared between stages, so it only ever
+ * reflects what's actively happening right now. */
+export interface JobProgress {
+  label: string;
+  current: number;
+  total: number;
+}
+
 /**
  * Persisted, on-disk state for one job (data/projects/<jobId>.json). This is the
  * source of truth the frontend polls - it survives page reloads, network drops, and
@@ -62,6 +72,9 @@ export interface ProjectState {
   options: ProcessOptions;
   status: ProjectStatus;
   log: string[];
+  /** Fine-grained progress for whatever the pipeline is doing right now (see
+   * JobProgress) - null between stages, while queued/reviewing/done, or on error. */
+  progress: JobProgress | null;
   /** Set when status is "reviewing" - the AI's proposed clips, editable before cutting. */
   pendingHighlights: HighlightClip[] | null;
   clips: GeneratedClip[];

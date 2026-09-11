@@ -3,11 +3,12 @@ import path from "path";
 import { fetchCaptions } from "./captions";
 import { cutClip, extractAudio, getVideoDimensions, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
-import { addClip, appendLog, loadProject, setPendingHighlights, setStatus, setTitle } from "./projects";
+import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle } from "./projects";
 import { withRetry } from "./retry";
 import { writeClipAss } from "./subtitles";
 import { transcribeAudio } from "./transcribe";
 import type { HighlightClip, ProcessOptions, TranscriptSegment, VideoInfo } from "./types";
+import { cacheDirFor } from "./videoCache";
 import { checkDependencies, downloadVideo, getVideoInfo } from "./ytdlp";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -22,9 +23,12 @@ const PUBLIC_CLIPS_DIR = path.join(process.cwd(), "public", "clips");
  *  - If a network-dependent step itself fails (the server's own connection drops
  *    mid-download/transcription/highlight-selection), each of those steps already
  *    retries a few times with backoff, and if it still fails, whatever succeeded
- *    earlier (the downloaded video, the transcript, the highlight list) is left on
- *    disk under data/<jobId>/ so a manual retry resumes from there instead of
- *    starting over.
+ *    earlier is left on disk so a manual retry resumes from there instead of starting
+ *    over: the highlight list under data/<jobId>/ (job-specific, since it depends on
+ *    that job's own settings), and the downloaded video/transcript under
+ *    data/cache/<hash-of-url>/ (shared across jobs, so generating more clips or
+ *    re-running with different settings for the same URL never re-downloads or
+ *    re-transcribes it - see lib/videoCache.ts).
  */
 export async function runPipeline(jobId: string, url: string, options: ProcessOptions): Promise<void> {
   const workDir = path.join(DATA_DIR, jobId);
@@ -33,6 +37,10 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
   try {
     await log("Checking that yt-dlp and ffmpeg are installed...");
     await checkDependencies();
+    // Clear out whatever progress a previous attempt left behind (e.g. "Downloading
+    // video 45%" from a run that then failed) so a retry doesn't show stale progress
+    // before its first real update arrives.
+    await setProgress(jobId, null);
 
     let burnCaptions = options.burnCaptions;
     if (burnCaptions && !(await supportsBurnedCaptions())) {
@@ -51,7 +59,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     });
     await setTitle(jobId, info.title);
 
-    const videoPath = await ensureVideoDownloaded(jobId, workDir, url, info, log);
+    const videoPath = await ensureVideoDownloaded(jobId, url, info, log);
     const segments = await ensureTranscript(jobId, workDir, url, videoPath, log);
 
     await log(`Transcript ready (${segments.length} segments). Asking the model to find the best parts...`);
@@ -73,6 +81,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
       .then(() => true)
       .catch(() => false);
     if (options.reviewBeforeCutting && !alreadyReviewed) {
+      await setProgress(jobId, null);
       await setPendingHighlights(jobId, highlights);
       await setStatus(jobId, "reviewing");
       await log("Candidate clips are ready for review - waiting for approval before cutting.");
@@ -80,6 +89,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     }
 
     await log(`Found ${highlights.length} candidate clips. Cutting video...`);
+    await setProgress(jobId, null);
 
     const clipsDir = path.join(PUBLIC_CLIPS_DIR, jobId);
     await fs.mkdir(clipsDir, { recursive: true });
@@ -109,6 +119,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     for (let index = alreadyCut; index < highlights.length; index++) {
       const highlight = highlights[index];
       await log(`Cutting clip ${index + 1}/${highlights.length}: ${highlight.title}`);
+      await setProgress(jobId, { label: "Cutting clips", current: index + 1, total: highlights.length });
 
       let subtitlesPath: string | undefined;
       if (captionCanvas) {
@@ -136,10 +147,12 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
       await addClip(jobId, { ...highlight, url: `/clips/${jobId}/${fileName}` });
     }
 
+    await setProgress(jobId, null);
     await setStatus(jobId, "done");
   } catch (err) {
     const message = err instanceof Error ? err.message : "Something went wrong.";
     await appendLog(jobId, `Error: ${message}`);
+    await setProgress(jobId, null);
     await setStatus(jobId, "error", message);
     // Deliberately don't clean up workDir here - it holds the downloaded video and
     // any transcript/highlight checkpoints a retry can reuse instead of redoing them.
@@ -154,23 +167,41 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
 
 export async function ensureVideoDownloaded(
   jobId: string,
-  workDir: string,
   url: string,
   info: VideoInfo,
   log: (message: string) => Promise<void>,
 ): Promise<string> {
-  const existing = (await fs.readdir(workDir).catch(() => [] as string[])).find(
+  // Cached by URL, not by job id: generating more clips or re-running with different
+  // settings for a video already downloaded (in this job or any other, past or
+  // present) finds it here and skips straight to using it.
+  const cacheDir = cacheDirFor(url);
+  await fs.mkdir(cacheDir, { recursive: true });
+
+  const existing = (await fs.readdir(cacheDir).catch(() => [] as string[])).find(
     (f) => f.startsWith("source.") && !f.endsWith(".part") && !f.endsWith(".ytdl"),
   );
   if (existing) {
-    await log("Found a previously downloaded video for this job - resuming from there.");
-    return path.join(workDir, existing);
+    await log("This video was already downloaded previously - reusing it instead of re-downloading.");
+    return path.join(cacheDir, existing);
   }
 
   await log(`Downloading "${info.title}"...`);
-  return withRetry(() => downloadVideo(url, workDir), {
-    onRetry: (attempt) => log(`Download failed - retrying (attempt ${attempt + 1})...`),
-  });
+  let lastReported = -1;
+  return withRetry(
+    () =>
+      downloadVideo(url, cacheDir, (percent) => {
+        const rounded = Math.min(100, Math.round(percent));
+        if (rounded === lastReported) return;
+        lastReported = rounded;
+        // This callback is synchronous (called straight from yt-dlp's stdout parser), so
+        // the write can't be awaited here - but it must not be a bare fire-and-forget
+        // either: an unawaited rejection (e.g. a transient disk error) would surface as
+        // an unhandled promise rejection and crash the whole process. Swallow it instead
+        // - losing one progress tick is harmless, the next one supersedes it seconds later.
+        setProgress(jobId, { label: "Downloading video", current: rounded, total: 100 }).catch(() => {});
+      }),
+    { onRetry: (attempt) => log(`Download failed - retrying (attempt ${attempt + 1})...`) },
+  );
 }
 
 export async function ensureTranscript(
@@ -180,17 +211,21 @@ export async function ensureTranscript(
   videoPath: string,
   log: (message: string) => Promise<void>,
 ): Promise<TranscriptSegment[]> {
-  const transcriptPath = path.join(workDir, "transcript.json");
+  // Same idea as the video itself: cached by URL so a transcript, once fetched or
+  // transcribed, is never redone for the same video again.
+  const cacheDir = cacheDirFor(url);
+  const transcriptPath = path.join(cacheDir, "transcript.json");
 
   const cached = await fs
     .readFile(transcriptPath, "utf8")
     .then((raw) => JSON.parse(raw) as TranscriptSegment[])
     .catch(() => null);
   if (cached) {
-    await log("Found a previously fetched transcript for this job - resuming from there.");
+    await log("This video was already transcribed previously - reusing that transcript.");
     return cached;
   }
 
+  await setProgress(jobId, null);
   await log("Checking for existing captions/subtitles...");
   let segments = await withRetry(() => fetchCaptions(url, workDir), {
     onRetry: (attempt) => log(`Checking captions failed - retrying (attempt ${attempt + 1})...`),
@@ -203,15 +238,24 @@ export async function ensureTranscript(
     const audioPath = await extractAudio(videoPath, workDir);
 
     await log("Transcribing audio - this can take a while for long videos...");
-    segments = await withRetry(() => transcribeAudio(audioPath, workDir, (message) => log(message)), {
-      onRetry: (attempt) => log(`Transcription failed - retrying (attempt ${attempt + 1})...`),
-    });
+    segments = await withRetry(
+      () =>
+        transcribeAudio(audioPath, workDir, async (message, chunkProgress) => {
+          await log(message);
+          if (chunkProgress) {
+            await setProgress(jobId, { label: "Transcribing audio", current: chunkProgress.current, total: chunkProgress.total });
+          }
+        }),
+      { onRetry: (attempt) => log(`Transcription failed - retrying (attempt ${attempt + 1})...`) },
+    );
   }
 
   if (!segments || segments.length === 0) {
     throw new Error("Could not get a transcript - the video may have no speech to analyze.");
   }
 
+  await setProgress(jobId, null);
+  await fs.mkdir(cacheDir, { recursive: true });
   await fs.writeFile(transcriptPath, JSON.stringify(segments), "utf8");
   return segments;
 }

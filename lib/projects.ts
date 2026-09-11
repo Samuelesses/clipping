@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import type { GeneratedClip, HighlightClip, ProcessOptions, ProjectState, ProjectStatus } from "./types";
+import type { GeneratedClip, HighlightClip, JobProgress, ProcessOptions, ProjectState, ProjectStatus } from "./types";
 
 const PROJECTS_DIR = path.join(process.cwd(), "data", "projects");
 const CLIPS_DIR = path.join(process.cwd(), "public", "clips");
@@ -32,6 +32,7 @@ export async function createProject(
     options,
     status: initialStatus,
     log: [],
+    progress: null,
     pendingHighlights: null,
     clips: [],
     errorMessage: null,
@@ -51,12 +52,30 @@ export async function loadProject(jobId: string): Promise<ProjectState | null> {
   }
 }
 
+// Progress updates fire rapidly and aren't awaited by their caller (see
+// lib/pipeline.ts's downloadVideo progress callback), so concurrent updateProject calls
+// for the same job are expected, not just theoretical. Without serializing them, two
+// overlapping read-mutate-write cycles race on the same temp file path and crash with
+// ENOENT on rename - queue each job's updates so they always run one at a time.
+const updateQueues = new Map<string, Promise<void>>();
+
 async function updateProject(jobId: string, mutate: (state: ProjectState) => void): Promise<void> {
-  const state = await loadProject(jobId);
-  if (!state) return;
-  mutate(state);
-  state.updatedAt = new Date().toISOString();
-  await writeJsonAtomic(projectPath(jobId), state);
+  const previous = updateQueues.get(jobId) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    const state = await loadProject(jobId);
+    if (!state) return;
+    mutate(state);
+    state.updatedAt = new Date().toISOString();
+    await writeJsonAtomic(projectPath(jobId), state);
+  });
+  // Store a version that never rejects, so one failed update doesn't permanently wedge
+  // this job's queue for every update after it - the rejection still propagates to
+  // whoever called this particular updateProject, via the returned (unwrapped) `next`.
+  updateQueues.set(
+    jobId,
+    next.catch(() => {}),
+  );
+  return next;
 }
 
 export async function appendLog(jobId: string, message: string): Promise<void> {
@@ -87,6 +106,12 @@ export async function setStatus(jobId: string, status: ProjectStatus, errorMessa
 export async function setPendingHighlights(jobId: string, highlights: HighlightClip[] | null): Promise<void> {
   await updateProject(jobId, (state) => {
     state.pendingHighlights = highlights;
+  });
+}
+
+export async function setProgress(jobId: string, progress: JobProgress | null): Promise<void> {
+  await updateProject(jobId, (state) => {
+    state.progress = progress;
   });
 }
 
