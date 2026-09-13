@@ -39,6 +39,29 @@ async function neutralizeOnboardingTour(page: Page): Promise<void> {
 }
 
 /**
+ * A fresh (cookieless-consent) browser context gets TikTok's own cookie-consent banner
+ * every run, fixed across the bottom of the page - which is right where the Post button
+ * lives, so it blocks that click the same way the onboarding tour blocked the caption
+ * box. Unlike the tour, this one has real, clickable buttons - just dismiss it via
+ * whichever one is present rather than hiding it, since burying a *consent* banner with
+ * CSS instead of answering it feels like the wrong call even though this is headless.
+ */
+async function dismissCookieBanner(page: Page): Promise<void> {
+  const decline = page.getByRole("button", { name: /decline optional cookies/i }).first();
+  const declined = await decline
+    .click({ timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (declined) return;
+
+  await page
+    .getByRole("button", { name: /allow all/i })
+    .first()
+    .click({ timeout: 2_000 })
+    .catch(() => {});
+}
+
+/**
  * Uploads and posts a video via TikTok's own upload page, authenticated with the
  * cookies in tiktok-cookies.txt - see lib/tiktokCookies.ts for why this exists and its
  * real risks/limitations. This drives real page UI (not TikTok's internal APIs, which
@@ -78,6 +101,7 @@ export async function uploadViaCookies(
       }
 
       await neutralizeOnboardingTour(page);
+      await dismissCookieBanner(page);
 
       const fileInput = page.locator('input[type="file"]').first();
       await fileInput.waitFor({ state: "attached", timeout: 30_000 });
@@ -97,6 +121,10 @@ export async function uploadViaCookies(
 
       const postButton = page.getByRole("button", { name: /^post$/i }).first();
       await postButton.waitFor({ state: "visible", timeout: 30_000 });
+      // The cookie banner can take a moment to render after navigation, so it's
+      // possible it wasn't there yet the first time this was called - check again now
+      // that we're right by the button it tends to cover.
+      await dismissCookieBanner(page);
       await postButton.click();
 
       // No official confirmation to poll here (unlike the OAuth API's publish-status
