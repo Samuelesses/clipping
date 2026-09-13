@@ -5,6 +5,7 @@ import { hasTiktokCookies, loadTiktokCookies } from "./tiktokCookies";
 
 const UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=upload";
 const DEBUG_SCREENSHOT_PATH = path.join(process.cwd(), "data", "tiktok-cookie-debug.png");
+const POST_RESULT_SCREENSHOT_PATH = path.join(process.cwd(), "data", "tiktok-post-result.png");
 
 /** Set TIKTOK_UPLOAD_HEADLESS=false to watch the browser work - the most useful way to
  * diagnose this when TikTok changes their upload page and a selector below stops matching. */
@@ -125,12 +126,48 @@ export async function uploadViaCookies(
       // possible it wasn't there yet the first time this was called - check again now
       // that we're right by the button it tends to cover.
       await dismissCookieBanner(page);
+
+      const previousUrl = page.url();
       await postButton.click();
 
-      // No official confirmation to poll here (unlike the OAuth API's publish-status
-      // endpoint) - TikTok's own UI feedback (a redirect or success toast) is the best
-      // signal available, so give it a moment to appear.
-      await page.waitForTimeout(5000);
+      // Clicking Post without throwing doesn't mean TikTok actually accepted the post -
+      // that click has silently no-op'd before (e.g. still-processing upload, an
+      // overlay we don't know about yet). Wait for one of: TikTok navigating away from
+      // the upload page, an upload/posted status message appearing, or an error message
+      // appearing - and only report success if we actually saw one of the first two.
+      const [navigated, statusShown, errorShown] = await Promise.all([
+        page
+          .waitForURL((url) => url.toString() !== previousUrl, { timeout: 45_000 })
+          .then(() => true)
+          .catch(() => false),
+        page
+          .getByText(/uploading|posted successfully|your video is (live|posted)|processing your video/i)
+          .first()
+          .waitFor({ state: "visible", timeout: 45_000 })
+          .then(() => true)
+          .catch(() => false),
+        page
+          .getByText(/failed|something went wrong|please try again|error occurred/i)
+          .first()
+          .waitFor({ state: "visible", timeout: 45_000 })
+          .then(() => true)
+          .catch(() => false),
+      ]);
+
+      await page.screenshot({ path: POST_RESULT_SCREENSHOT_PATH }).catch(() => {});
+
+      if (errorShown) {
+        throw new Error(
+          `TikTok showed an error after clicking Post - check ${POST_RESULT_SCREENSHOT_PATH} to see what it said.`,
+        );
+      }
+      if (!navigated && !statusShown) {
+        throw new Error(
+          "Clicked Post, but nothing on the page confirmed TikTok actually registered it (no redirect or " +
+            `upload status appeared) - check ${POST_RESULT_SCREENSHOT_PATH} to see what the page looked like. ` +
+            "Check TikTok directly before retrying, in case it did post and this would post it twice.",
+        );
+      }
 
       return { message: "Uploaded and posted via TikTok's own upload page." };
     } catch (err) {
