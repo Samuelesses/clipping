@@ -12,15 +12,18 @@ const execFileAsync = promisify(execFile);
 const YOUTUBE_BOT_CHECK_RE = /sign in to confirm you.?re not a bot/i;
 
 // ffmpeg's own corruption guard: it aborts a decode once too large a fraction of frames
-// error out (e.g. a truncated/incomplete download that still has a valid-looking
-// container and stream headers, so it passes a "does this file have a video stream"
-// check but falls apart partway through actual frame data). This is a property of the
-// cached source file, not a transient failure - retrying the same cut just fails the
-// same way again, so callers that cut clips need to recognize it and re-download
-// instead of retrying the cut.
+// error out. Most commonly this is a truncated/incomplete download that still has a
+// valid-looking container and stream headers (so it passes a "does this file have a
+// video stream" check but falls apart partway through actual frame data) - but it can
+// also happen on a perfectly intact file if cutClip's `-ss`-before-`-i` seek lands off a
+// real frame boundary in a stream that isn't reliably seekable (some AV1-in-mp4 files;
+// see lib/ytdlp.ts's format selection for why downloads now prefer avc1/H.264 instead).
+// Either way it's a property of this specific source file, not a transient failure -
+// retrying the same cut just fails the same way again, so callers that cut clips need
+// to recognize it and re-download instead.
 const DECODE_CORRUPTION_RE = /decode error rate .* exceeds maximum/i;
 
-/** Thrown when ffmpeg reports a source file too corrupted to decode - see DECODE_CORRUPTION_RE. */
+/** Thrown when ffmpeg can't decode enough of a source file to finish a cut - see DECODE_CORRUPTION_RE. */
 export class CorruptSourceError extends Error {}
 
 export interface RunOptions {
@@ -75,8 +78,8 @@ function buildError(command: string, args: string[], detail: string): Error {
 
   if (command === "ffmpeg" && DECODE_CORRUPTION_RE.test(detail)) {
     return new CorruptSourceError(
-      `${prefix}: the source video is too corrupted to decode (most of it failed to decode cleanly). This is ` +
-        "usually an incomplete/truncated download, not a problem with the clip settings.",
+      `${prefix}: most of the source video failed to decode cleanly. This is usually an incomplete/truncated ` +
+        "download, or an AV1 stream that doesn't seek reliably - not a problem with the clip settings.",
     );
   }
 

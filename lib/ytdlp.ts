@@ -79,7 +79,17 @@ export async function downloadVideo(
     "yt-dlp",
     [
       "-f",
-      "bv*[height<=1080]+ba/b[height<=1080]/b",
+      // Prefer avc1 (H.264) over AV1/VP9 when it's available at the same resolution.
+      // YouTube increasingly serves AV1 as its "best" 1080p stream, and yt-dlp's default
+      // format ranking picks it accordingly - but ffmpeg's `-ss`-before`-i` seeking (used
+      // by cutClip to jump to a clip's start time) isn't reliable against how some of
+      // these AV1-in-mp4 files are indexed: the seek can land off a real frame boundary
+      // and desync the decoder entirely, which is what was actually behind the "Decode
+      // error rate exceeds maximum" / "Conversion failed!" failures - not a corrupted
+      // download. H.264 doesn't have this problem, so ask for it explicitly first and
+      // only fall back to whatever's best (AV1/VP9 included) if a video has no avc1
+      // stream at all.
+      "bv*[vcodec^=avc1][height<=1080]+ba/bv*[height<=1080]+ba/b[height<=1080]/b",
       "--merge-output-format",
       "mp4",
       "--no-playlist",
