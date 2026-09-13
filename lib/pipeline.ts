@@ -4,7 +4,7 @@ import { fetchCaptions } from "./captions";
 import { CorruptSourceError } from "./exec";
 import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
-import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, updateClip } from "./projects";
+import { addClipAt, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, updateClip } from "./projects";
 import { withRetry } from "./retry";
 import { writeClipAss } from "./subtitles";
 import { transcribeAudio } from "./transcribe";
@@ -112,11 +112,15 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
 
     const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, options.vertical, burnCaptions);
 
-    // Resume support: a prior attempt may have already cut and recorded some clips
-    // before failing later on - pick up right after the last one.
-    const alreadyCut = (await loadProject(jobId))?.clips.length ?? 0;
+    for (let index = 0; index < highlights.length; index++) {
+      // Re-check on every iteration (not just once before the loop) - if this same job
+      // is somehow already being cut by another still-running invocation (a retry fired
+      // before a previous run finished, a dev-server reload leaving an old run alive,
+      // etc.), this catches up to whatever it already finished instead of blindly
+      // redoing - and re-cutting - clips from the start.
+      const doneSoFar = (await loadProject(jobId))?.clips.length ?? 0;
+      if (index < doneSoFar) continue;
 
-    for (let index = alreadyCut; index < highlights.length; index++) {
       const highlight = highlights[index];
       await log(`Cutting clip ${index + 1}/${highlights.length}: ${highlight.title}`);
       await setProgress(jobId, { label: "Cutting clips", current: index + 1, total: highlights.length });
@@ -152,7 +156,11 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
         throw err;
       }
 
-      await addClip(jobId, { ...highlight, url: `/clips/${jobId}/${fileName}` });
+      // Appends only if `index` is still the next open slot - if a concurrent
+      // invocation already filled it first, this is a no-op instead of a duplicate
+      // (see addClipAt's own comment in lib/projects.ts for why that race is possible
+      // at all despite the check above).
+      await addClipAt(jobId, index, { ...highlight, url: `/clips/${jobId}/${fileName}` });
     }
 
     await setProgress(jobId, null);

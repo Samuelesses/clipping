@@ -16,10 +16,19 @@ interface QueuedJob {
 
 let activeCount = 0;
 const pending: QueuedJob[] = [];
+// Every jobId currently sitting in `pending` or actively running - checked before
+// enqueueing so the same job can never be started twice in parallel (e.g. a retry
+// fired a second time before the first had transitioned off "queued"/"running", or
+// recoverStuckJobs below finding a job that's still actually alive). Two overlapping
+// runs of the same job would otherwise both cut and append the same clip - see
+// addClipAt in lib/projects.ts for the belt-and-suspenders fix on that side too.
+const jobsInFlight = new Set<string>();
 let recovered = false;
 
 export function enqueueJob(jobId: string, url: string, options: ProcessOptions): void {
   recoverStuckJobs();
+  if (jobsInFlight.has(jobId)) return;
+  jobsInFlight.add(jobId);
   pending.push({ jobId, url, options });
   tryStartNext();
 }
@@ -36,6 +45,7 @@ function tryStartNext(): void {
       })
       .finally(() => {
         activeCount--;
+        jobsInFlight.delete(job.jobId);
         tryStartNext();
       });
   }
@@ -54,7 +64,8 @@ function recoverStuckJobs(): void {
   listProjects()
     .then((projects) => {
       for (const project of projects) {
-        if (project.status === "queued" || project.status === "running") {
+        if ((project.status === "queued" || project.status === "running") && !jobsInFlight.has(project.jobId)) {
+          jobsInFlight.add(project.jobId);
           pending.push({ jobId: project.jobId, url: project.url, options: project.options });
         }
       }

@@ -90,10 +90,24 @@ export async function setTitle(jobId: string, title: string): Promise<void> {
   });
 }
 
-export async function addClip(jobId: string, clip: GeneratedClip): Promise<void> {
+/**
+ * Appends a clip only if it's the next one expected at `index` - used by the cutting
+ * loop so two overlapping runs of the same job (e.g. a retry fired while a previous run
+ * was still finishing) can't both append their own copy of the same clip. Checking "is
+ * this the next slot" and pushing happen inside the same updateProject mutation, which
+ * is queued per jobId (see updateQueues above), so it's atomic with respect to any other
+ * call for this job - whichever run gets here first wins the slot, and the other's call
+ * becomes a no-op instead of a duplicate. Returns whether it actually appended, so a
+ * loser can skip its own logging/progress for that index.
+ */
+export async function addClipAt(jobId: string, index: number, clip: GeneratedClip): Promise<boolean> {
+  let added = false;
   await updateProject(jobId, (state) => {
+    if (state.clips.length !== index) return;
     state.clips.push(clip);
+    added = true;
   });
+  return added;
 }
 
 export async function updateClip(jobId: string, index: number, patch: Partial<GeneratedClip>): Promise<void> {
