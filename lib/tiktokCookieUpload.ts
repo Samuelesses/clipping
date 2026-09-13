@@ -130,6 +130,16 @@ export async function uploadViaCookies(
       const previousUrl = page.url();
       await postButton.click();
 
+      // TikTok's own moderation ("Content check lite") takes ~10 minutes, and posting
+      // before it finishes pops a "Continue to post?" confirmation dialog asking
+      // whether to post anyway - click through it if it appears (it won't for a video
+      // whose check has already completed by the time we get here).
+      await page
+        .getByRole("button", { name: /post now/i })
+        .first()
+        .click({ timeout: 10_000 })
+        .catch(() => {});
+
       // Clicking Post without throwing doesn't mean TikTok actually accepted the post -
       // that click has silently no-op'd before (e.g. still-processing upload, an
       // overlay we don't know about yet). Wait for one of: TikTok navigating away from
