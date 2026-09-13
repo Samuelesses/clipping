@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { fetchCaptions } from "./captions";
+import { CorruptSourceError } from "./exec";
 import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
 import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, updateClip } from "./projects";
@@ -13,6 +14,21 @@ import { checkDependencies, downloadVideo, getVideoInfo } from "./ytdlp";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const PUBLIC_CLIPS_DIR = path.join(process.cwd(), "public", "clips");
+
+/**
+ * Deletes the cached source video for a URL after ffmpeg finds it too corrupted to
+ * decode (see CorruptSourceError). The stream-presence check ensureVideoDownloaded
+ * uses to decide whether to reuse a cached file can't catch this - a truncated download
+ * still has a valid container/stream header, it just falls apart partway through the
+ * actual frame data - so without this, every retry would keep reusing the same broken
+ * file and fail the same way forever. Leaves the transcript cache alone: it's unrelated
+ * to the video bytes and still valid.
+ */
+async function invalidateCachedSource(url: string): Promise<void> {
+  const cacheDir = cacheDirFor(url);
+  const files = (await fs.readdir(cacheDir).catch(() => [] as string[])).filter((f) => f.startsWith("source."));
+  await Promise.all(files.map((f) => fs.rm(path.join(cacheDir, f), { force: true })));
+}
 
 /**
  * Runs (or resumes) a job end to end, persisting progress to disk as it goes
@@ -122,11 +138,19 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
       }
 
       const fileName = `clip-${index + 1}.mp4`;
-      await cutClip(videoPath, path.join(clipsDir, fileName), highlight.start, highlight.end, {
-        vertical: options.vertical,
-        reframeStyle: options.reframeStyle,
-        subtitlesPath,
-      });
+      try {
+        await cutClip(videoPath, path.join(clipsDir, fileName), highlight.start, highlight.end, {
+          vertical: options.vertical,
+          reframeStyle: options.reframeStyle,
+          subtitlesPath,
+        });
+      } catch (err) {
+        if (err instanceof CorruptSourceError) {
+          await invalidateCachedSource(url);
+          throw new Error(`${err.message} The cached download has been removed - retrying will fetch it fresh.`);
+        }
+        throw err;
+      }
 
       await addClip(jobId, { ...highlight, url: `/clips/${jobId}/${fileName}` });
     }
@@ -266,7 +290,17 @@ export async function regenerateClip(
     // cutClip itself writes to a local temp path and moves the finished file into place
     // (see lib/ffmpeg.ts), so this overwrites finalOutPath atomically with no partial
     // reads and no separate tmp/rename dance needed here.
-    await cutClip(videoPath, finalOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath });
+    try {
+      await cutClip(videoPath, finalOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath });
+    } catch (err) {
+      if (err instanceof CorruptSourceError) {
+        await invalidateCachedSource(project.url);
+        throw new Error(
+          `${err.message} The cached download has been removed - use "Generate more" to re-download it.`,
+        );
+      }
+      throw err;
+    }
 
     // Cache-bust: the URL path is unchanged (same file), but browsers cache video
     // responses aggressively - a changing query string forces a reload of the new cut.

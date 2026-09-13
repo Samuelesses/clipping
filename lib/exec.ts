@@ -11,6 +11,18 @@ const execFileAsync = promisify(execFile);
 // instead of burning through withRetry's attempts first.
 const YOUTUBE_BOT_CHECK_RE = /sign in to confirm you.?re not a bot/i;
 
+// ffmpeg's own corruption guard: it aborts a decode once too large a fraction of frames
+// error out (e.g. a truncated/incomplete download that still has a valid-looking
+// container and stream headers, so it passes a "does this file have a video stream"
+// check but falls apart partway through actual frame data). This is a property of the
+// cached source file, not a transient failure - retrying the same cut just fails the
+// same way again, so callers that cut clips need to recognize it and re-download
+// instead of retrying the cut.
+const DECODE_CORRUPTION_RE = /decode error rate .* exceeds maximum/i;
+
+/** Thrown when ffmpeg reports a source file too corrupted to decode - see DECODE_CORRUPTION_RE. */
+export class CorruptSourceError extends Error {}
+
 export interface RunOptions {
   /** Called with each raw chunk of stdout as it arrives - not guaranteed to be
    * line-aligned - so a caller can parse live progress out of a long-running command
@@ -58,6 +70,13 @@ function buildError(command: string, args: string[], detail: string): Error {
         "(or firefox/edge/safari/etc) in .env.local, or export a cookies.txt and set " +
         "YTDLP_COOKIES_FILE=/path/to/cookies.txt. Then restart the app. See " +
         "https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp for details.",
+    );
+  }
+
+  if (command === "ffmpeg" && DECODE_CORRUPTION_RE.test(detail)) {
+    return new CorruptSourceError(
+      `${prefix}: the source video is too corrupted to decode (most of it failed to decode cleanly). This is ` +
+        "usually an incomplete/truncated download, not a problem with the clip settings.",
     );
   }
 
