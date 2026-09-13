@@ -169,6 +169,9 @@ Terms of Service.** Know what you're accepting before using this:
   `tiktok-cookies.txt` the same way.
 
 Setup:
+0. If you already had this project checked out before Option A existed, run `npm install`
+   first - `playwright` is a new dependency, and skipping this shows up as a
+   `Module not found: Can't resolve 'playwright'` build error.
 1. Install a "cookies.txt export" browser extension (the same one from the yt-dlp section
    above works for any site).
 2. Go to tiktok.com while logged in, click the extension, export as `tiktok-cookies.txt`.
