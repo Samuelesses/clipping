@@ -40,14 +40,52 @@ export default function Home() {
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [tiktokConnected, setTiktokConnected] = useState<boolean | null>(null);
+  const [tiktokMessage, setTiktokMessage] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
 
   useEffect(() => {
     refreshProjects();
+    refreshTiktokStatus();
     const stored = window.localStorage.getItem(ACTIVE_JOB_KEY);
     if (stored) setActiveJobId(stored);
+
+    // The OAuth callback (see app/api/tiktok/callback) redirects back here with one of
+    // these query params - surface it once, then strip it so a page refresh doesn't
+    // keep re-showing a stale message.
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("tiktokError");
+    const connected = params.get("tiktokConnected");
+    if (error) {
+      setTiktokMessage(`Couldn't connect TikTok: ${error}`);
+    } else if (connected) {
+      setTiktokMessage("TikTok connected.");
+      refreshTiktokStatus();
+    }
+    if (error || connected) {
+      params.delete("tiktokError");
+      params.delete("tiktokConnected");
+      const query = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+    }
   }, []);
+
+  async function refreshTiktokStatus() {
+    try {
+      const res = await fetch("/api/tiktok/status");
+      const data = await res.json();
+      setTiktokConnected(Boolean(data.connected));
+    } catch {
+      // Non-fatal - the connect button just won't reflect the latest state this tick.
+    }
+  }
+
+  async function handleDisconnectTiktok() {
+    await fetch("/api/tiktok/disconnect", { method: "POST" });
+    setTiktokConnected(false);
+    setTiktokMessage("TikTok disconnected.");
+  }
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -242,12 +280,27 @@ export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-16">
       <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Clipping</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight">Clipping</h1>
+          <TiktokConnectButton connected={tiktokConnected} onDisconnect={handleDisconnectTiktok} />
+        </div>
         <p className="text-neutral-400">
           Paste one or more YouTube video or Twitch VOD links (one per line). Each downloads locally, gets
           a transcript, and asks AI to pick the best moments, cut into vertical clips with captions ready
           to post. Progress is saved as it goes, so a dropped connection never loses your place.
         </p>
+        {tiktokMessage && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-2 text-sm text-neutral-300">
+            <span>{tiktokMessage}</span>
+            <button
+              type="button"
+              onClick={() => setTiktokMessage(null)}
+              className="flex-shrink-0 text-neutral-500 hover:text-neutral-300"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </header>
 
       <form ref={formRef} onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
@@ -588,6 +641,7 @@ export default function Home() {
                   </div>
                   <CaptionBox text={clip.socialCaption} />
                   <RegeneratePanel defaultOptions={project!.options} onRegenerate={(overrides) => handleRegenerateClip(i, overrides)} />
+                  <TiktokPostButton jobId={project!.jobId} index={i} defaultCaption={clip.socialCaption} connected={tiktokConnected} />
                 </div>
               ))}
             </div>
@@ -600,6 +654,8 @@ export default function Home() {
                   number={i + 1}
                   defaultOptions={project!.options}
                   onRegenerate={(overrides) => handleRegenerateClip(i, overrides)}
+                  jobId={project!.jobId}
+                  tiktokConnected={tiktokConnected}
                 />
               ))}
             </div>
@@ -645,11 +701,15 @@ function ClipRow({
   number,
   defaultOptions,
   onRegenerate,
+  jobId,
+  tiktokConnected,
 }: {
   clip: GeneratedClip;
   number: number;
   defaultOptions: RegenerateDefaults;
   onRegenerate: (overrides: RegenerateOverrides) => Promise<void>;
+  jobId: string;
+  tiktokConnected: boolean | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -700,6 +760,7 @@ function ClipRow({
           <video controls preload="metadata" src={clip.url} className="mx-auto max-h-[60vh] w-auto max-w-full rounded-lg bg-black" />
           <CaptionBox text={clip.socialCaption} />
           <RegeneratePanel defaultOptions={defaultOptions} onRegenerate={onRegenerate} />
+          <TiktokPostButton jobId={jobId} index={number - 1} defaultCaption={clip.socialCaption} connected={tiktokConnected} />
         </div>
       )}
     </div>
@@ -790,6 +851,147 @@ function RegeneratePanel({
       </div>
     </div>
   );
+}
+
+/** Connect/disconnect control for the TikTok account this app posts to. */
+function TiktokConnectButton({
+  connected,
+  onDisconnect,
+}: {
+  connected: boolean | null;
+  onDisconnect: () => Promise<void>;
+}) {
+  if (connected === null) return null;
+
+  if (!connected) {
+    return (
+      <a
+        href="/api/tiktok/auth"
+        className="flex-shrink-0 rounded-lg border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500 hover:text-white"
+      >
+        Connect TikTok
+      </a>
+    );
+  }
+
+  return (
+    <div className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-1.5 text-sm">
+      <span className="text-neutral-300">TikTok connected</span>
+      <button type="button" onClick={onDisconnect} className="text-neutral-500 underline underline-offset-2 hover:text-red-400">
+        Disconnect
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Uploads one clip to TikTok as a Direct Post. Requires TikTok to already be connected
+ * (see TiktokConnectButton) - until the connected app passes TikTok's own audit, posts
+ * land as private (SELF_ONLY), which this surfaces rather than hides, since it's a
+ * TikTok platform restriction this app can't work around.
+ */
+function TiktokPostButton({
+  jobId,
+  index,
+  defaultCaption,
+  connected,
+}: {
+  jobId: string;
+  index: number;
+  defaultCaption: string;
+  connected: boolean | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [caption, setCaption] = useState(defaultCaption);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ status: string; privacyLevel?: string; failReason?: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!connected) {
+    return <span className="text-sm text-neutral-600">Post to TikTok (connect TikTok above first)</span>;
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+      >
+        Post to TikTok
+      </button>
+    );
+  }
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/projects/${jobId}/clips/${index}/post-tiktok`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caption }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not post this clip to TikTok.");
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not post this clip to TikTok.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-neutral-800 bg-neutral-950 p-3">
+      <p className="text-xs text-neutral-500">
+        Uploads this clip to TikTok as a Direct Post. Unless your TikTok developer app has passed TikTok's
+        audit, it lands as private (only visible to you) - open TikTok to publish it from there.
+      </p>
+      <textarea
+        value={caption}
+        onChange={(e) => setCaption(e.target.value)}
+        rows={2}
+        className="w-full resize-y rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-sm outline-none focus:border-neutral-500"
+      />
+      {result && <TiktokResultMessage result={result} />}
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={submitting}
+          onClick={handleSubmit}
+          className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? "Posting..." : "Post to TikTok"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-sm text-neutral-500 underline underline-offset-2 hover:text-neutral-300"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TiktokResultMessage({ result }: { result: { status: string; privacyLevel?: string; failReason?: string } }) {
+  if (result.status === "PUBLISH_COMPLETE") {
+    return (
+      <p className="text-sm text-green-400">
+        {result.privacyLevel === "SELF_ONLY"
+          ? "Posted - it's private for now, open TikTok to publish it."
+          : "Posted to TikTok!"}
+      </p>
+    );
+  }
+  if (result.status === "FAILED") {
+    return <p className="text-sm text-red-400">Failed: {result.failReason || "unknown reason"}</p>;
+  }
+  return <p className="text-sm text-amber-300">Still processing on TikTok's side (status: {result.status}) - check TikTok shortly.</p>;
 }
 
 /** A button that copies fixed text to the clipboard, showing "Copied!" briefly after. */

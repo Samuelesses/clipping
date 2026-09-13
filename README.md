@@ -41,7 +41,8 @@ highlight selection, and transcription when needed).
 
 Clips can be browsed as a grid (with inline previews) or a compact list, and downloaded one at a
 time or all together as a single ZIP - handy since TikTok's uploader lets you select up to 30
-videos at once from a folder.
+videos at once from a folder. Once TikTok is connected (see "Posting to TikTok" below), each
+clip also has its own **Post to TikTok** button.
 
 **If one clip came out wrong** (bad reframe, missing captions, whatever), **Regenerate this
 clip** on it re-renders just that one - same moment, title, and caption, untouched - with
@@ -113,6 +114,8 @@ All configuration lives in `.env.local` (see `.env.example`):
 | `OPENAI_MODEL` | no | Overrides the model used to pick highlights (default `gpt-5.1`). |
 | `YTDLP_COOKIES_FILE` | no | Non-default path to a `cookies.txt` export - see below. |
 | `YTDLP_COOKIES_FROM_BROWSER` | no | Read cookies live from an installed browser instead (e.g. `chrome`) - see below. |
+| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | no | Only for the "Post to TikTok" button - see "Posting to TikTok" below. |
+| `TIKTOK_REDIRECT_URI` | no | Only if not running at the default `http://localhost:3000` - see below. |
 
 You can also tune, per request, from the "advanced options" in the UI: how many clips to
 generate, and the min/max length of each clip.
@@ -143,6 +146,52 @@ for more detail.
 
 YouTube sessions expire eventually - if the bot check comes back after a while, just
 re-export a fresh `cookies.txt` the same way.
+
+## Posting to TikTok
+
+Each clip has a **Post to TikTok** button that uploads it straight from your machine using
+TikTok's official [Content Posting API](https://developers.tiktok.com/doc/content-posting-api-get-started) -
+no browser automation, no third-party service.
+
+**Read this before setting it up**: unless your TikTok developer app has gone through TikTok's
+own app review/audit, TikTok restricts what an app in that state can post to **private
+(`SELF_ONLY`)** - visible only to you, not the public. This app always asks TikTok which privacy
+levels your specific app + account combination is allowed to use and picks the most private one
+available; it can't post publicly on your behalf until TikTok itself approves your app for that.
+In practice that means: **Post to TikTok** uploads the video and creates the post, but you'll
+still open the TikTok app afterward to actually publish it (change it from private to public) -
+this button gets 90% of the way there (no manual upload, no re-typing the caption), it doesn't
+fully eliminate the last tap. If you want genuinely one-tap public posting, you'd need to submit
+your TikTok app for their audit, which is a separate process on TikTok's end, outside what this
+app can do for you.
+
+Setup:
+
+1. Go to [developers.tiktok.com](https://developers.tiktok.com/), sign in, and create an app.
+2. Under that app's products, add **Login Kit** and **Content Posting API**.
+3. In Login Kit's settings, add a redirect URI of exactly `http://localhost:3000/api/tiktok/callback`
+   (or match whatever `TIKTOK_REDIRECT_URI` you set, if you changed the default port).
+4. Under scopes, make sure `user.info.basic` and `video.publish` are enabled for the app.
+5. Copy the app's **Client key** and **Client secret** into `.env.local` as `TIKTOK_CLIENT_KEY`
+   and `TIKTOK_CLIENT_SECRET`, then restart `npm run dev`.
+6. In the app, click **Connect TikTok** (top right) and approve access on TikTok's page - you're
+   redirected back here once it's done.
+7. Generate some clips, then use **Post to TikTok** on any of them. You can edit the caption
+   (defaults to that clip's social caption) right before posting.
+
+Your TikTok session (access + refresh token) is stored locally in `data/tiktok-tokens.json`
+(gitignored along with the rest of `data/`) - it's refreshed automatically as needed, and
+**Disconnect** next to "TikTok connected" removes it.
+
+A few other TikTok-side details worth knowing:
+- Unaudited apps also have a low daily post quota - if posting suddenly fails after several
+  successful posts in a day, that's likely why; it resets the next day.
+- Very long clips may need to be uploaded in multiple chunks - this app handles that
+  automatically per TikTok's chunking rules, no size limit on your end beyond TikTok's own
+  (a few GB).
+- If `Post to TikTok` fails immediately, the error message is usually TikTok's own API error
+  passed straight through - most say plainly what's wrong (expired session, disallowed privacy
+  level, quota, etc).
 
 ## Cost
 
