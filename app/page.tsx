@@ -615,6 +615,13 @@ export default function Home() {
             upload picker. Done with this project? Delete it above to free up disk space.
           </p>
 
+          <TiktokUploadAllButton
+            jobId={project!.jobId}
+            clips={clips}
+            connected={tiktokConnected}
+            cookieMode={tiktokCookieMode}
+          />
+
           {viewMode === "grid" ? (
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {clips.map((clip, i) => (
@@ -1038,6 +1045,109 @@ function TiktokResultMessage({ result }: { result: TiktokPostResult }) {
     return <p className="text-sm text-red-400">Failed: {result.failReason || "unknown reason"}</p>;
   }
   return <p className="text-sm text-amber-300">Still processing on TikTok's side (status: {result.status}) - check TikTok shortly.</p>;
+}
+
+interface ClipUploadStatus {
+  state: "waiting" | "uploading" | "done" | "error";
+  message?: string;
+}
+
+/**
+ * Posts every clip in the project to TikTok, one at a time (not in parallel) - each
+ * clip's own default caption is used as-is, unmodified. Sequential matters here even in
+ * API mode, but especially in cookie mode: that path drives a real browser as you, and
+ * running several of those at once against the same account is exactly the kind of
+ * bursty automated behavior that risks getting it flagged.
+ */
+function TiktokUploadAllButton({
+  jobId,
+  clips,
+  connected,
+  cookieMode,
+}: {
+  jobId: string;
+  clips: GeneratedClip[];
+  connected: boolean | null;
+  cookieMode: boolean;
+}) {
+  const [running, setRunning] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
+  const [statuses, setStatuses] = useState<ClipUploadStatus[]>([]);
+
+  if (!connected || clips.length === 0) return null;
+
+  async function handleUploadAll() {
+    setRunning(true);
+    const next: ClipUploadStatus[] = clips.map(() => ({ state: "waiting" }));
+    setStatuses(next);
+
+    for (let i = 0; i < clips.length; i++) {
+      setCurrentIndex(i);
+      next[i] = { state: "uploading" };
+      setStatuses([...next]);
+      try {
+        const res = await fetch(`/api/projects/${jobId}/clips/${i}/post-tiktok`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ caption: clips[i].socialCaption }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Could not post this clip to TikTok.");
+        next[i] = { state: "done", message: data.message };
+      } catch (err) {
+        next[i] = { state: "error", message: err instanceof Error ? err.message : "Could not post this clip." };
+      }
+      setStatuses([...next]);
+    }
+
+    setCurrentIndex(null);
+    setRunning(false);
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        disabled={running}
+        onClick={handleUploadAll}
+        className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {running ? `Uploading ${(currentIndex ?? 0) + 1}/${clips.length}...` : "Upload all to TikTok"}
+      </button>
+      {running && cookieMode && (
+        <p className="text-xs text-neutral-500">
+          One clip at a time via a headless browser - this can take a while for a whole project.
+        </p>
+      )}
+      {statuses.length > 0 && (
+        <ul className="space-y-1 text-xs">
+          {statuses.map((status, i) => (
+            <li
+              key={i}
+              className={
+                status.state === "done"
+                  ? "text-green-400"
+                  : status.state === "error"
+                    ? "text-red-400"
+                    : status.state === "uploading"
+                      ? "text-blue-400"
+                      : "text-neutral-600"
+              }
+            >
+              Clip {i + 1}:{" "}
+              {status.state === "waiting"
+                ? "Waiting..."
+                : status.state === "uploading"
+                  ? "Uploading..."
+                  : status.state === "done"
+                    ? "Posted"
+                    : `Failed - ${status.message}`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /** A button that copies fixed text to the clipboard, showing "Copied!" briefly after. */
