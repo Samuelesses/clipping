@@ -41,6 +41,7 @@ export default function Home() {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [tiktokConnected, setTiktokConnected] = useState<boolean | null>(null);
+  const [tiktokCookieMode, setTiktokCookieMode] = useState(false);
   const [tiktokMessage, setTiktokMessage] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -76,6 +77,7 @@ export default function Home() {
       const res = await fetch("/api/tiktok/status");
       const data = await res.json();
       setTiktokConnected(Boolean(data.connected));
+      setTiktokCookieMode(Boolean(data.cookieMode));
     } catch {
       // Non-fatal - the connect button just won't reflect the latest state this tick.
     }
@@ -282,7 +284,7 @@ export default function Home() {
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="text-3xl font-semibold tracking-tight">Clipping</h1>
-          <TiktokConnectButton connected={tiktokConnected} onDisconnect={handleDisconnectTiktok} />
+          <TiktokConnectButton connected={tiktokConnected} cookieMode={tiktokCookieMode} onDisconnect={handleDisconnectTiktok} />
         </div>
         <p className="text-neutral-400">
           Paste one or more YouTube video or Twitch VOD links (one per line). Each downloads locally, gets
@@ -641,7 +643,13 @@ export default function Home() {
                   </div>
                   <CaptionBox text={clip.socialCaption} />
                   <RegeneratePanel defaultOptions={project!.options} onRegenerate={(overrides) => handleRegenerateClip(i, overrides)} />
-                  <TiktokPostButton jobId={project!.jobId} index={i} defaultCaption={clip.socialCaption} connected={tiktokConnected} />
+                  <TiktokPostButton
+                    jobId={project!.jobId}
+                    index={i}
+                    defaultCaption={clip.socialCaption}
+                    connected={tiktokConnected}
+                    cookieMode={tiktokCookieMode}
+                  />
                 </div>
               ))}
             </div>
@@ -656,6 +664,7 @@ export default function Home() {
                   onRegenerate={(overrides) => handleRegenerateClip(i, overrides)}
                   jobId={project!.jobId}
                   tiktokConnected={tiktokConnected}
+                  tiktokCookieMode={tiktokCookieMode}
                 />
               ))}
             </div>
@@ -703,6 +712,7 @@ function ClipRow({
   onRegenerate,
   jobId,
   tiktokConnected,
+  tiktokCookieMode,
 }: {
   clip: GeneratedClip;
   number: number;
@@ -710,6 +720,7 @@ function ClipRow({
   onRegenerate: (overrides: RegenerateOverrides) => Promise<void>;
   jobId: string;
   tiktokConnected: boolean | null;
+  tiktokCookieMode: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -760,7 +771,13 @@ function ClipRow({
           <video controls preload="metadata" src={clip.url} className="mx-auto max-h-[60vh] w-auto max-w-full rounded-lg bg-black" />
           <CaptionBox text={clip.socialCaption} />
           <RegeneratePanel defaultOptions={defaultOptions} onRegenerate={onRegenerate} />
-          <TiktokPostButton jobId={jobId} index={number - 1} defaultCaption={clip.socialCaption} connected={tiktokConnected} />
+          <TiktokPostButton
+            jobId={jobId}
+            index={number - 1}
+            defaultCaption={clip.socialCaption}
+            connected={tiktokConnected}
+            cookieMode={tiktokCookieMode}
+          />
         </div>
       )}
     </div>
@@ -856,12 +873,24 @@ function RegeneratePanel({
 /** Connect/disconnect control for the TikTok account this app posts to. */
 function TiktokConnectButton({
   connected,
+  cookieMode,
   onDisconnect,
 }: {
   connected: boolean | null;
+  cookieMode: boolean;
   onDisconnect: () => Promise<void>;
 }) {
   if (connected === null) return null;
+
+  // A dropped-in tiktok-cookies.txt is managed by hand (like YouTube's cookies.txt) -
+  // there's nothing to disconnect from here, just remove the file to stop using it.
+  if (cookieMode) {
+    return (
+      <div className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-amber-900 bg-amber-950/20 px-3 py-1.5 text-sm">
+        <span className="text-amber-300">TikTok connected (tiktok-cookies.txt)</span>
+      </div>
+    );
+  }
 
   if (!connected) {
     return (
@@ -890,21 +919,31 @@ function TiktokConnectButton({
  * land as private (SELF_ONLY), which this surfaces rather than hides, since it's a
  * TikTok platform restriction this app can't work around.
  */
+interface TiktokPostResult {
+  mode: "cookies" | "api";
+  status: string;
+  privacyLevel?: string;
+  failReason?: string;
+  message?: string;
+}
+
 function TiktokPostButton({
   jobId,
   index,
   defaultCaption,
   connected,
+  cookieMode,
 }: {
   jobId: string;
   index: number;
   defaultCaption: string;
   connected: boolean | null;
+  cookieMode: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [caption, setCaption] = useState(defaultCaption);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ status: string; privacyLevel?: string; failReason?: string } | null>(null);
+  const [result, setResult] = useState<TiktokPostResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (!connected) {
@@ -946,8 +985,12 @@ function TiktokPostButton({
   return (
     <div className="space-y-2 rounded-lg border border-neutral-800 bg-neutral-950 p-3">
       <p className="text-xs text-neutral-500">
-        Uploads this clip to TikTok as a Direct Post. Unless your TikTok developer app has passed TikTok's
-        audit, it lands as private (only visible to you) - open TikTok to publish it from there.
+        {cookieMode
+          ? "Posts this clip via TikTok's own upload page using tiktok-cookies.txt - unofficial, so it can " +
+            "break if TikTok changes their site, and runs a headless browser in the background (can take a " +
+            "minute)."
+          : "Uploads this clip to TikTok as a Direct Post. Unless your TikTok developer app has passed " +
+            "TikTok's audit, it lands as private (only visible to you) - open TikTok to publish it from there."}
       </p>
       <textarea
         value={caption}
@@ -978,7 +1021,10 @@ function TiktokPostButton({
   );
 }
 
-function TiktokResultMessage({ result }: { result: { status: string; privacyLevel?: string; failReason?: string } }) {
+function TiktokResultMessage({ result }: { result: TiktokPostResult }) {
+  if (result.mode === "cookies" && result.status === "PUBLISH_COMPLETE") {
+    return <p className="text-sm text-green-400">{result.message || "Posted to TikTok."}</p>;
+  }
   if (result.status === "PUBLISH_COMPLETE") {
     return (
       <p className="text-sm text-green-400">

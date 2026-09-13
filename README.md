@@ -149,9 +149,42 @@ re-export a fresh `cookies.txt` the same way.
 
 ## Posting to TikTok
 
-Each clip has a **Post to TikTok** button that uploads it straight from your machine using
-TikTok's official [Content Posting API](https://developers.tiktok.com/doc/content-posting-api-get-started) -
-no browser automation, no third-party service.
+Each clip has a **Post to TikTok** button. There are two ways to set it up - pick one:
+
+### Option A: cookies (quick, but unofficial - read the risks)
+
+Drop a `tiktok-cookies.txt` file (exported the same way as YouTube's `cookies.txt` - see above)
+at the **root of this project**, and **Post to TikTok** will drive TikTok's own upload page with
+a real (headless) browser, authenticated as you. No developer app, no review, no waiting.
+
+**This is not TikTok's official API - it's automating their website, which is against TikTok's
+Terms of Service.** Know what you're accepting before using this:
+- Real risk of your TikTok account being flagged or restricted for automated posting.
+- It can silently break whenever TikTok changes their upload page's markup - there's no
+  changelog to follow like a real API has. If it stops working, check `data/tiktok-cookie-debug.png`
+  (saved automatically on failure) to see what the page looked like when it broke.
+- Your session cookie is as sensitive as your password - anyone with your `tiktok-cookies.txt`
+  can act as you on TikTok. Keep it out of version control (already gitignored) and don't share it.
+- Sessions expire. If it starts failing with a login redirect, re-export a fresh
+  `tiktok-cookies.txt` the same way.
+
+Setup:
+1. Install a "cookies.txt export" browser extension (the same one from the yt-dlp section
+   above works for any site).
+2. Go to tiktok.com while logged in, click the extension, export as `tiktok-cookies.txt`.
+3. Drop that file at the project root, next to `package.json`.
+4. Run `npx playwright install chromium` once (downloads the browser this drives - only needed
+   the first time).
+5. Generate some clips, then use **Post to TikTok** on one. It can take a minute - it's really
+   uploading through the actual website. Set `TIKTOK_UPLOAD_HEADLESS=false` in `.env.local` if
+   you want to watch the browser work (useful for figuring out what broke, if it does).
+
+### Option B: TikTok's official Content Posting API (slower to set up, no ban risk)
+
+If `tiktok-cookies.txt` isn't present, **Post to TikTok** instead uses TikTok's official
+[Content Posting API](https://developers.tiktok.com/doc/content-posting-api-get-started) via
+OAuth - no ToS risk, but it requires registering a TikTok developer app and going through their
+review process.
 
 **Read this before setting it up**: unless your TikTok developer app has gone through TikTok's
 own app review/audit, TikTok restricts what an app in that state can post to **private
@@ -163,7 +196,8 @@ still open the TikTok app afterward to actually publish it (change it from priva
 this button gets 90% of the way there (no manual upload, no re-typing the caption), it doesn't
 fully eliminate the last tap. If you want genuinely one-tap public posting, you'd need to submit
 your TikTok app for their audit, which is a separate process on TikTok's end, outside what this
-app can do for you.
+app can do for you. The upside over Option A: it's fully sanctioned by TikTok, so there's no
+account risk, and once audited it can post genuinely public.
 
 Setup:
 
@@ -171,7 +205,9 @@ Setup:
 2. Under that app's products, add **Login Kit** and **Content Posting API**.
 3. In Login Kit's settings, add a redirect URI of exactly `http://localhost:3000/api/tiktok/callback`
    (or match whatever `TIKTOK_REDIRECT_URI` you set, if you changed the default port).
-4. Under scopes, make sure `user.info.basic` and `video.publish` are enabled for the app.
+4. Under scopes, make sure `user.info.basic` and `video.publish` are enabled for the app (within
+   Content Posting API's own product settings, not just the review form, there's usually a
+   separate "Direct Post" toggle that needs to be on before `video.publish` becomes selectable).
 5. Copy the app's **Client key** and **Client secret** into `.env.local` as `TIKTOK_CLIENT_KEY`
    and `TIKTOK_CLIENT_SECRET`, then restart `npm run dev`.
 6. In the app, click **Connect TikTok** (top right) and approve access on TikTok's page - you're

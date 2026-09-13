@@ -2,6 +2,8 @@ import path from "path";
 import { isValidJobId } from "@/lib/jobId";
 import { loadProject } from "@/lib/projects";
 import { fetchPublishStatus, publishVideo } from "@/lib/tiktok";
+import { hasTiktokCookies } from "@/lib/tiktokCookies";
+import { uploadViaCookies } from "@/lib/tiktokCookieUpload";
 import { NextResponse } from "next/server";
 
 const TERMINAL_STATUSES = new Set(["PUBLISH_COMPLETE", "FAILED"]);
@@ -44,6 +46,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   const relativePath = clip.url.split("?")[0];
   const filePath = path.join(process.cwd(), "public", relativePath);
 
+  // tiktok-cookies.txt (dropped in by hand, no developer app/review needed) takes
+  // precedence over the OAuth/official-API path when present - see
+  // lib/tiktokCookies.ts for what this trades away.
+  if (hasTiktokCookies()) {
+    try {
+      const { message } = await uploadViaCookies(filePath, caption);
+      return NextResponse.json({ mode: "cookies", status: "PUBLISH_COMPLETE", message });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not post this clip to TikTok.";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
+
   try {
     const { publishId, privacyLevel } = await publishVideo(filePath, caption);
 
@@ -54,6 +69,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     }
 
     return NextResponse.json({
+      mode: "api",
       publishId,
       privacyLevel,
       status: status.status,
