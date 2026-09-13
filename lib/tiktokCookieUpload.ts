@@ -20,24 +20,22 @@ export interface CookieUploadResult {
  * TikTok Studio shows a react-joyride onboarding tour on some accounts/sessions - its
  * overlay sits on top of the page (including the caption box) and blocks every click
  * until dismissed, which is what produced the "intercepts pointer events" timeouts.
- * There's no stable "skip" selector to rely on, so this just clicks whatever
- * dismiss-shaped button the tour tooltip offers, falling back to Escape.
+ * Its buttons aren't reliably clickable (no stable accessible name to target, and
+ * clicking through the overlay just hits the overlay itself), so instead of trying to
+ * dismiss the tour through its own UI, this permanently disables the overlay with a
+ * CSS override injected before it can ever block anything. It's a page-level
+ * stylesheet keyed by selector, not a reference to a specific element, so it still
+ * applies even if the tour portal mounts (or remounts) after this runs.
  */
-async function dismissOnboardingTour(page: Page): Promise<void> {
-  const portal = page.locator("#react-joyride-portal");
-  for (let attempt = 0; attempt < 8; attempt++) {
-    if ((await portal.count()) === 0) return;
-    const overlay = portal.locator('[data-test-id="overlay"], .react-joyride__overlay');
-    if ((await overlay.count()) === 0) return;
-
-    const dismissButton = portal.getByRole("button", { name: /skip|got it|close|done|next|finish/i }).first();
-    if (await dismissButton.count()) {
-      await dismissButton.click({ timeout: 2000 }).catch(() => {});
-    } else {
-      await page.keyboard.press("Escape").catch(() => {});
-    }
-    await page.waitForTimeout(400);
-  }
+async function neutralizeOnboardingTour(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: `
+      #react-joyride-portal, .react-joyride__overlay, .react-joyride__spotlight {
+        display: none !important;
+        pointer-events: none !important;
+      }
+    `,
+  });
 }
 
 /**
@@ -79,7 +77,7 @@ export async function uploadViaCookies(
         );
       }
 
-      await dismissOnboardingTour(page);
+      await neutralizeOnboardingTour(page);
 
       const fileInput = page.locator('input[type="file"]').first();
       await fileInput.waitFor({ state: "attached", timeout: 30_000 });
@@ -87,11 +85,9 @@ export async function uploadViaCookies(
 
       // TikTok processes the upload (thumbnail generation, etc.) before the caption
       // editor becomes interactive - this can take a while for a fresh video, so wait
-      // on that state rather than a fixed delay. The onboarding tour also tends to pop
-      // up right around here, once there's something on the page for it to point at.
+      // on that state rather than a fixed delay.
       const captionBox = page.locator('[contenteditable="true"]').first();
       await captionBox.waitFor({ state: "visible", timeout: 180_000 });
-      await dismissOnboardingTour(page);
 
       // Replace whatever TikTok pre-filled (usually the filename) with our own caption.
       await captionBox.click();
@@ -101,7 +97,6 @@ export async function uploadViaCookies(
 
       const postButton = page.getByRole("button", { name: /^post$/i }).first();
       await postButton.waitFor({ state: "visible", timeout: 30_000 });
-      await dismissOnboardingTour(page);
       await postButton.click();
 
       // No official confirmation to poll here (unlike the OAuth API's publish-status
