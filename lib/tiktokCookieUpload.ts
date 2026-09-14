@@ -63,6 +63,42 @@ async function dismissCookieBanner(page: Page): Promise<void> {
 }
 
 /**
+ * TikTok Studio's "Who can watch this video" control keeps whatever it was last set to
+ * for this account/session rather than defaulting to Everyone on every upload - and
+ * this flow never touches it, so a post silently inherits that ambient setting. A
+ * restricted post (Friends, or Only me) looks identical to a successful public one from
+ * here: no error, the same "posted" confirmation - which is exactly the kind of thing
+ * that would explain automated posts landing with ~0 views while manual posts get
+ * normal reach. Force it to Everyone explicitly instead of trusting whatever's already
+ * selected. Best-effort: if TikTok's markup for this control doesn't match (it's one of
+ * the more likely things to change/vary by account), this doesn't fail the whole
+ * upload - the video still posts, just with whatever visibility was already set.
+ */
+async function ensurePublicVisibility(page: Page): Promise<void> {
+  const select = page.locator("select").filter({ has: page.getByRole("option", { name: /^everyone$/i }) }).first();
+  const viaSelect = await select
+    .selectOption({ label: "Everyone" })
+    .then(() => true)
+    .catch(() => false);
+  if (viaSelect) return;
+
+  // Older/alternate layout: a button/combobox that opens a listbox of choices rather
+  // than a native <select>.
+  const trigger = page.getByText(/who can watch this video/i).first();
+  const opened = await trigger
+    .click({ timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!opened) return;
+
+  await page
+    .getByRole("option", { name: /^everyone$/i })
+    .first()
+    .click({ timeout: 5_000 })
+    .catch(() => {});
+}
+
+/**
  * Uploads and posts a video via TikTok's own upload page, authenticated with the
  * cookies in tiktok-cookies.txt - see lib/tiktokCookies.ts for why this exists and its
  * real risks/limitations. This drives real page UI (not TikTok's internal APIs, which
@@ -119,6 +155,8 @@ export async function uploadViaCookies(
       await page.keyboard.press("ControlOrMeta+A");
       await page.keyboard.press("Backspace");
       await captionBox.type(caption, { delay: 8 });
+
+      await ensurePublicVisibility(page);
 
       const postButton = page.getByRole("button", { name: /^post$/i }).first();
       await postButton.waitFor({ state: "visible", timeout: 30_000 });
