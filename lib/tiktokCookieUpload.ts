@@ -1,20 +1,50 @@
+import fs from "fs/promises";
 import path from "path";
 import { chromium } from "playwright";
-import type { Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import { hasTiktokCookies, loadTiktokCookies } from "./tiktokCookies";
 
 const UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=upload";
 const DEBUG_SCREENSHOT_PATH = path.join(process.cwd(), "data", "tiktok-cookie-debug.png");
 const POST_RESULT_SCREENSHOT_PATH = path.join(process.cwd(), "data", "tiktok-post-result.png");
 
+// A real, persistent browser profile - not a fresh disposable one rebuilt from a static
+// cookie snapshot on every run. That distinction matters: a profile whose entire
+// existence is "load tiktok.com/upload, post, close" every single time, with the exact
+// same cookies re-injected each run instead of the session evolving naturally the way a
+// real logged-in browser's does, is itself a pattern that looks nothing like an actual
+// person's browser. Using a persistent profile - ideally your actual installed Chrome,
+// not Playwright's bundled Chromium - means the session, cookies, and local storage
+// persist and update across runs exactly the way they would if this were a browser
+// window you kept open and reused yourself, because that's genuinely what it is.
+const PROFILE_DIR = path.join(process.cwd(), "data", "tiktok-browser-profile");
+
 /** Set TIKTOK_UPLOAD_HEADLESS=false to watch the browser work - the most useful way to
- * diagnose this when TikTok changes their upload page and a selector below stops matching. */
+ * diagnose this when TikTok changes their upload page and a selector below stops matching,
+ * and required for the very first run if this profile has never logged into TikTok before. */
 function isHeadless(): boolean {
   return process.env.TIKTOK_UPLOAD_HEADLESS !== "false";
 }
 
 export interface CookieUploadResult {
   message: string;
+}
+
+/**
+ * Launches the persistent profile in PROFILE_DIR, preferring your actual installed
+ * Google Chrome (channel "chrome") over Playwright's bundled Chromium - it's the real
+ * browser binary you'd otherwise use by hand, not a synthetic one. Falls back to bundled
+ * Chromium only if Chrome isn't installed on this machine; the persistent-profile
+ * benefit still applies either way, just not with the identical binary.
+ */
+async function launchTiktokContext(): Promise<BrowserContext> {
+  await fs.mkdir(PROFILE_DIR, { recursive: true });
+  const options = { headless: isHeadless(), viewport: { width: 1280, height: 900 } };
+  try {
+    return await chromium.launchPersistentContext(PROFILE_DIR, { ...options, channel: "chrome" });
+  } catch {
+    return await chromium.launchPersistentContext(PROFILE_DIR, options);
+  }
 }
 
 /**
@@ -40,12 +70,13 @@ async function neutralizeOnboardingTour(page: Page): Promise<void> {
 }
 
 /**
- * A fresh (cookieless-consent) browser context gets TikTok's own cookie-consent banner
- * every run, fixed across the bottom of the page - which is right where the Post button
- * lives, so it blocks that click the same way the onboarding tour blocked the caption
- * box. Unlike the tour, this one has real, clickable buttons - just dismiss it via
- * whichever one is present rather than hiding it, since burying a *consent* banner with
- * CSS instead of answering it feels like the wrong call even though this is headless.
+ * A brand new profile gets TikTok's own cookie-consent banner on its first visit, fixed
+ * across the bottom of the page - which is right where the Post button lives, so it
+ * blocks that click the same way the onboarding tour blocked the caption box. A
+ * persistent profile only sees this once (the choice is remembered for later runs), but
+ * still needs handling the first time. Unlike the tour, this one has real, clickable
+ * buttons - just dismiss it via whichever one is present rather than hiding it, since
+ * burying a *consent* banner with CSS instead of answering it feels like the wrong call.
  */
 async function dismissCookieBanner(page: Page): Promise<void> {
   const decline = page.getByRole("button", { name: /decline optional cookies/i }).first();
@@ -67,12 +98,11 @@ async function dismissCookieBanner(page: Page): Promise<void> {
  * for this account/session rather than defaulting to Everyone on every upload - and
  * this flow never touches it, so a post silently inherits that ambient setting. A
  * restricted post (Friends, or Only me) looks identical to a successful public one from
- * here: no error, the same "posted" confirmation - which is exactly the kind of thing
- * that would explain automated posts landing with ~0 views while manual posts get
- * normal reach. Force it to Everyone explicitly instead of trusting whatever's already
- * selected. Best-effort: if TikTok's markup for this control doesn't match (it's one of
- * the more likely things to change/vary by account), this doesn't fail the whole
- * upload - the video still posts, just with whatever visibility was already set.
+ * here: no error, the same "posted" confirmation. Force it to Everyone explicitly
+ * instead of trusting whatever's already selected. Best-effort: if TikTok's markup for
+ * this control doesn't match (it's one of the more likely things to change/vary by
+ * account), this doesn't fail the whole upload - the video still posts, just with
+ * whatever visibility was already selected.
  */
 async function ensurePublicVisibility(page: Page): Promise<void> {
   const select = page.locator("select").filter({ has: page.getByRole("option", { name: /^everyone$/i }) }).first();
@@ -99,41 +129,37 @@ async function ensurePublicVisibility(page: Page): Promise<void> {
 }
 
 /**
- * Uploads and posts a video via TikTok's own upload page, authenticated with the
- * cookies in tiktok-cookies.txt - see lib/tiktokCookies.ts for why this exists and its
- * real risks/limitations. This drives real page UI (not TikTok's internal APIs, which
- * are protected by request-signing this doesn't attempt to replicate), so it's slower
- * than a true API call and depends on TikTok's markup not having changed since this was
- * written - if a step below times out, that's the most likely reason.
+ * Uploads and posts a video via TikTok's own upload page, driving a persistent, real
+ * browser profile (see PROFILE_DIR/launchTiktokContext) rather than a disposable one -
+ * see lib/tiktokCookies.ts for why this exists at all and its real risks/limitations.
+ * This drives real page UI (not TikTok's internal APIs, which are protected by
+ * request-signing this doesn't attempt to replicate), so it's slower than a true API
+ * call and depends on TikTok's markup not having changed since this was written - if a
+ * step below times out, that's the most likely reason.
  */
-export async function uploadViaCookies(
-  videoPath: string,
-  caption: string,
-  // Overridable only for testing the interaction sequence against a stand-in page -
-  // production callers always get the real TikTok upload URL.
-  uploadUrl: string = UPLOAD_URL,
-): Promise<CookieUploadResult> {
-  if (!hasTiktokCookies()) {
-    throw new Error(
-      "No tiktok-cookies.txt found at the project root - export one from a browser tab logged into " +
-        "tiktok.com (same way as YouTube's cookies.txt) and drop it there.",
-    );
-  }
-  const cookies = await loadTiktokCookies();
-
-  const browser = await chromium.launch({ headless: isHeadless() });
+export async function uploadViaCookies(videoPath: string, caption: string, uploadUrl: string = UPLOAD_URL): Promise<CookieUploadResult> {
+  const context = await launchTiktokContext();
   try {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    await context.addCookies(cookies);
-    const page = await context.newPage();
+    const page = context.pages()[0] ?? (await context.newPage());
 
     try {
       await page.goto(uploadUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
 
+      // First run of a fresh profile: not logged in yet. Seed it from tiktok-cookies.txt
+      // if one's been dropped in (same convention as YouTube's cookies.txt), then retry -
+      // after this, the profile carries its own session going forward and this branch
+      // won't run again.
+      if (/\/login/.test(page.url()) && hasTiktokCookies()) {
+        await context.addCookies(await loadTiktokCookies());
+        await page.goto(uploadUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      }
+
       if (/\/login/.test(page.url())) {
         throw new Error(
-          "TikTok redirected to its login page - the cookies in tiktok-cookies.txt are missing or expired. " +
-            "Re-export cookies.txt from a browser tab where you're currently logged into tiktok.com.",
+          "This browser profile isn't logged into TikTok yet. Either run once with " +
+            "TIKTOK_UPLOAD_HEADLESS=false and log in by hand in the window that opens (it only needs to " +
+            `happen once - the profile at ${PROFILE_DIR} keeps the session after that), or drop a ` +
+            "tiktok-cookies.txt at the project root to seed it automatically.",
         );
       }
 
@@ -224,6 +250,6 @@ export async function uploadViaCookies(
       throw new Error(`${message} A screenshot of what the page looked like was saved to ${DEBUG_SCREENSHOT_PATH}.`);
     }
   } finally {
-    await browser.close();
+    await context.close();
   }
 }

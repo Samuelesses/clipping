@@ -155,18 +155,30 @@ Each clip has a **Post to TikTok** button. There are two ways to set it up - pic
 
 Drop a `tiktok-cookies.txt` file (exported the same way as YouTube's `cookies.txt` - see above)
 at the **root of this project**, and **Post to TikTok** will drive TikTok's own upload page with
-a real (headless) browser, authenticated as you. No developer app, no review, no waiting.
+a real, persistent browser profile authenticated as you - your actual installed Google Chrome if
+it's on this machine, Playwright's bundled Chromium otherwise. The cookie file only seeds that
+profile's very first login; after that the profile keeps its own session and evolves the same way
+a real logged-in browser's does, rather than a disposable one rebuilt from the same static cookie
+snapshot on every run. No developer app, no review, no waiting.
 
 **This is not TikTok's official API - it's automating their website, which is against TikTok's
 Terms of Service.** Know what you're accepting before using this:
-- Real risk of your TikTok account being flagged or restricted for automated posting.
+- Real risk of your TikTok account being flagged or restricted for automated posting, and posts
+  can end up with suppressed reach even when they otherwise look fine (public, playable) - TikTok
+  is actively trying to detect exactly this kind of tool. A persistent, real-browser profile
+  removes some obvious tells (a synthetic one-shot profile, a headless-only fingerprint, the same
+  unchanging cookie snapshot every run) but there's no way to guarantee it evades TikTok's
+  detection, now or after any future change on their end - see Option B if you need reliable reach.
 - It can silently break whenever TikTok changes their upload page's markup - there's no
   changelog to follow like a real API has. If it stops working, check `data/tiktok-cookie-debug.png`
   (saved automatically on failure) to see what the page looked like when it broke.
 - Your session cookie is as sensitive as your password - anyone with your `tiktok-cookies.txt`
-  can act as you on TikTok. Keep it out of version control (already gitignored) and don't share it.
-- Sessions expire. If it starts failing with a login redirect, re-export a fresh
-  `tiktok-cookies.txt` the same way.
+  can act as you on TikTok, and so can anyone with the browser profile this creates at
+  `data/tiktok-browser-profile/`. Both are already gitignored - keep it that way, and don't share
+  either.
+- Sessions expire. If it starts failing with a login redirect and there's no `tiktok-cookies.txt`
+  to auto-seed a new one, run once with `TIKTOK_UPLOAD_HEADLESS=false` and log in by hand in the
+  window that opens - it only needs to happen once per profile.
 
 Setup:
 0. If you already had this project checked out before Option A existed, run `npm install`
@@ -176,11 +188,12 @@ Setup:
    above works for any site).
 2. Go to tiktok.com while logged in, click the extension, export as `tiktok-cookies.txt`.
 3. Drop that file at the project root, next to `package.json`.
-4. Run `npx playwright install chromium` once (downloads the browser this drives - only needed
-   the first time).
+4. Run `npx playwright install chromium` once (downloads a fallback browser for machines
+   without Google Chrome installed - only needed the first time).
 5. Generate some clips, then use **Post to TikTok** on one. It can take a minute - it's really
    uploading through the actual website. Set `TIKTOK_UPLOAD_HEADLESS=false` in `.env.local` if
-   you want to watch the browser work (useful for figuring out what broke, if it does).
+   you want to watch the browser work (useful for figuring out what broke, if it does, and
+   required the very first time if you're not relying on `tiktok-cookies.txt` to auto-log-in).
 
 ### Option B: TikTok's official Content Posting API (slower to set up, no ban risk)
 

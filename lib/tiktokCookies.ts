@@ -5,14 +5,18 @@ import type { Cookie } from "playwright";
 
 /**
  * Unofficial alternative to lib/tiktok.ts's OAuth flow: drives TikTok's actual upload
- * page with a real (headless) browser, authenticated with a session cookie you export
- * yourself - the same "export cookies.txt from a logged-in browser tab" pattern already
- * used for YouTube (see lib/ytdlp.ts's cookieArgs). No TikTok developer app, no review,
- * no audit - but also no official support: this automates TikTok's own website rather
- * than an API TikTok publishes for this purpose, which is against TikTok's Terms of
- * Service and carries real risk of the account being flagged, and it can silently break
- * whenever TikTok changes their upload page's markup. Used only when tiktok-cookies.txt
- * is present at the project root; the OAuth path in lib/tiktok.ts is otherwise used.
+ * page with a real, persistent browser profile (see lib/tiktokCookieUpload.ts) rather
+ * than TikTok's own API. This file's only job is getting that profile logged in in the
+ * first place: this cookie file (the same "export cookies.txt from a logged-in browser
+ * tab" pattern already used for YouTube - see lib/ytdlp.ts's cookieArgs) seeds a session
+ * into the profile on its very first run, so it doesn't have to be logged into by hand.
+ * After that first login, the profile keeps its own session, same as a real browser
+ * would. No TikTok developer app, no review, no audit - but also no official support:
+ * this automates TikTok's own website rather than an API TikTok publishes for this
+ * purpose, which is against TikTok's Terms of Service and carries real risk of the
+ * account being flagged, and it can silently break whenever TikTok changes their upload
+ * page's markup. Used only when tiktok-cookies.txt is present at the project root; the
+ * OAuth path in lib/tiktok.ts is otherwise used.
  */
 export const TIKTOK_COOKIES_PATH = path.join(process.cwd(), "tiktok-cookies.txt");
 
