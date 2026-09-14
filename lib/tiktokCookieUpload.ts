@@ -94,6 +94,24 @@ async function dismissCookieBanner(page: Page): Promise<void> {
 }
 
 /**
+ * Whether the page is currently showing TikTok's login screen. Checking the URL alone
+ * (e.g. for "/login") isn't reliable - TikTok can gate an unauthenticated visit to the
+ * upload page behind a login screen that doesn't necessarily change the path the way a
+ * dedicated /login route would, and guessing wrong here means silently waiting on
+ * upload-page elements that will never appear instead of seeding a session or failing
+ * with a clear message. Check for the login screen's own heading instead, which is what
+ * actually determines whether we're logged in or not regardless of the URL shape.
+ */
+async function isOnLoginScreen(page: Page): Promise<boolean> {
+  if (/\/login/.test(page.url())) return true;
+  return page
+    .getByRole("heading", { name: /log in to tiktok/i })
+    .first()
+    .isVisible()
+    .catch(() => false);
+}
+
+/**
  * TikTok Studio's "Who can watch this video" control keeps whatever it was last set to
  * for this account/session rather than defaulting to Everyone on every upload - and
  * this flow never touches it, so a post silently inherits that ambient setting. A
@@ -149,12 +167,12 @@ export async function uploadViaCookies(videoPath: string, caption: string, uploa
       // if one's been dropped in (same convention as YouTube's cookies.txt), then retry -
       // after this, the profile carries its own session going forward and this branch
       // won't run again.
-      if (/\/login/.test(page.url()) && hasTiktokCookies()) {
+      if ((await isOnLoginScreen(page)) && hasTiktokCookies()) {
         await context.addCookies(await loadTiktokCookies());
         await page.goto(uploadUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
       }
 
-      if (/\/login/.test(page.url())) {
+      if (await isOnLoginScreen(page)) {
         throw new Error(
           "This browser profile isn't logged into TikTok yet. Either run once with " +
             "TIKTOK_UPLOAD_HEADLESS=false and log in by hand in the window that opens (it only needs to " +
