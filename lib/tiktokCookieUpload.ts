@@ -19,6 +19,12 @@ const POST_RESULT_SCREENSHOT_PATH = path.join(process.cwd(), "data", "tiktok-pos
 // window you kept open and reused yourself, because that's genuinely what it is.
 const PROFILE_DIR = path.join(process.cwd(), "data", "tiktok-browser-profile");
 
+// How long to wait, when running headed, for a human to actually finish logging in by
+// hand (find the window, decide how to log in, maybe scan a QR code with their phone).
+// Every other wait in this file is tuned for an automated step taking seconds - this one
+// is fundamentally different and needs real minutes, not a login-page-detection timeout.
+const MANUAL_LOGIN_TIMEOUT_MS = 5 * 60_000;
+
 /** Set TIKTOK_UPLOAD_HEADLESS=false to watch the browser work - the most useful way to
  * diagnose this when TikTok changes their upload page and a selector below stops matching,
  * and required for the very first run if this profile has never logged into TikTok before. */
@@ -125,6 +131,22 @@ async function isOnLoginScreen(page: Page): Promise<boolean> {
 }
 
 /**
+ * Polls until the login screen is gone (i.e. a human logged in by hand) or timeoutMs
+ * elapses. Playwright's built-in waitFor* helpers wait for one specific element to
+ * appear/disappear, but "logged in" here is defined by isOnLoginScreen's own multi-signal
+ * check rather than a single locator, so this drives that check with a plain poll loop
+ * instead.
+ */
+async function waitForManualLogin(page: Page, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isOnLoginScreen(page))) return true;
+    await page.waitForTimeout(2_000);
+  }
+  return false;
+}
+
+/**
  * TikTok Studio's "Who can watch this video" control keeps whatever it was last set to
  * for this account/session rather than defaulting to Everyone on every upload - and
  * this flow never touches it, so a post silently inherits that ambient setting. A
@@ -186,12 +208,28 @@ export async function uploadViaCookies(videoPath: string, caption: string, uploa
       }
 
       if (await isOnLoginScreen(page)) {
-        throw new Error(
-          "This browser profile isn't logged into TikTok yet. Either run once with " +
-            "TIKTOK_UPLOAD_HEADLESS=false and log in by hand in the window that opens (it only needs to " +
-            `happen once - the profile at ${PROFILE_DIR} keeps the session after that), or drop a ` +
-            "tiktok-cookies.txt at the project root to seed it automatically.",
-        );
+        if (isHeadless()) {
+          throw new Error(
+            "This browser profile isn't logged into TikTok yet, and there's no visible window to log into by " +
+              "hand (TIKTOK_UPLOAD_HEADLESS isn't set to false). Set TIKTOK_UPLOAD_HEADLESS=false in " +
+              ".env.local, restart the dev server, and try again - a real browser window will open and wait " +
+              "for you to log in.",
+          );
+        }
+        // Headed and not logged in: wait for a real human to actually finish logging in
+        // (QR scan, password, whatever) instead of giving up after one check - the rest
+        // of this flow's timeouts are tuned for automated steps taking seconds, nowhere
+        // near enough time to notice the window, click through, and complete a login.
+        const loggedIn = await waitForManualLogin(page, MANUAL_LOGIN_TIMEOUT_MS);
+        if (!loggedIn) {
+          throw new Error(
+            `Still not logged into TikTok after waiting ${MANUAL_LOGIN_TIMEOUT_MS / 60_000} minutes - log in ` +
+              `in the browser window, then try again. The profile at ${PROFILE_DIR} keeps the session once ` +
+              "you do, so this only needs to happen once.",
+          );
+        }
+        // The login redirect may have landed somewhere other than the upload page.
+        await page.goto(uploadUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
       }
 
       await neutralizeOnboardingTour(page);
