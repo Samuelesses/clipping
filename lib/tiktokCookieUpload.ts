@@ -99,13 +99,26 @@ async function dismissCookieBanner(page: Page): Promise<void> {
  * upload page behind a login screen that doesn't necessarily change the path the way a
  * dedicated /login route would, and guessing wrong here means silently waiting on
  * upload-page elements that will never appear instead of seeding a session or failing
- * with a clear message. Check for the login screen's own heading instead, which is what
- * actually determines whether we're logged in or not regardless of the URL shape.
+ * with a clear message. getByText (not getByRole) is deliberate here: the login
+ * screen's "Log in to TikTok" heading is plain styled text with no ARIA heading role in
+ * TikTok's markup, so matching by role found nothing - matching by rendered text works
+ * regardless of what element/role it's actually written as.
  */
 async function isOnLoginScreen(page: Page): Promise<boolean> {
   if (/\/login/.test(page.url())) return true;
+
+  const loginHeadingVisible = await page
+    .getByText(/log in to tiktok/i)
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (loginHeadingVisible) return true;
+
+  // Independent second signal in case the heading text itself is ever split across
+  // elements in a way getByText's substring match misses - "Use QR code" is a real
+  // button unique to this screen, not something that could appear on the upload page.
   return page
-    .getByRole("heading", { name: /log in to tiktok/i })
+    .getByRole("button", { name: /use qr code/i })
     .first()
     .isVisible()
     .catch(() => false);
