@@ -237,12 +237,15 @@ export default function Home() {
   }
 
   const clips: GeneratedClip[] = project?.clips ?? [];
+  const completedCount = projects.filter((p) => p.status === "completed").length;
+  const runningCount = projects.filter((p) => p.status === "running" || p.status === "queued").length;
+  const totalClips = projects.reduce((count, p) => count + p.clips.length, 0);
   const urlCount = urlsText.split("\n").map((u) => u.trim()).filter(Boolean).length;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-16">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Clipping</h1>
+    <main className="studio-shell mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-5 py-10 sm:px-8">
+      <header className="studio-hero space-y-4">
+        <div className="studio-eyebrow"><span className="studio-live-dot" /> CREATOR WORKSPACE <span className="studio-version">/ STUDIO 2.0</span></div><h1 className="studio-title">Turn long videos into <span>standout moments.</span></h1>
         <p className="text-neutral-400">
           Paste one or more YouTube video or Twitch VOD links (one per line). Each downloads locally, gets
           a transcript, and asks AI to pick the best moments, cut into vertical clips with captions ready
@@ -250,7 +253,9 @@ export default function Home() {
         </p>
       </header>
 
-      <form ref={formRef} onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+      <section className="studio-stats" aria-label="Workspace overview"><div className="studio-stat"><span>PROJECTS</span><strong>{projects.length}</strong><small>{completedCount} completed</small></div><div className="studio-stat"><span>CLIPS CREATED</span><strong>{totalClips}</strong><small>Across your library</small></div><div className="studio-stat"><span>IN PROGRESS</span><strong>{runningCount}</strong><small>Background processing</small></div></section>
+      <div className="studio-section-heading"><div><span className="studio-section-kicker">01 / CREATE</span><h2>New clipping project</h2></div><span className="studio-section-hint">Start with a link. Fine-tune later.</span></div>
+      <form ref={formRef} onSubmit={handleSubmit} className="studio-panel studio-create space-y-5 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-2">
             <label htmlFor="urls" className="text-sm font-medium text-neutral-300">
