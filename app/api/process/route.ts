@@ -43,6 +43,13 @@ export async function POST(request: Request) {
     reviewBeforeCutting: body.reviewBeforeCutting === true,
   };
 
+  if (sharedOptions.minClipSeconds > sharedOptions.maxClipSeconds) {
+    return NextResponse.json({ error: "Minimum clip length cannot exceed maximum clip length." }, { status: 400 });
+  }
+  if (urls.length > 25) {
+    return NextResponse.json({ error: "Submit no more than 25 URLs per batch." }, { status: 400 });
+  }
+
   const jobIds: string[] = [];
   for (const url of urls) {
     const options: ProcessOptions = { url, ...sharedOptions };
