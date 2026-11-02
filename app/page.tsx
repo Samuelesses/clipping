@@ -241,7 +241,7 @@ export default function Home() {
   }
 
   const clips: GeneratedClip[] = project?.clips ?? [];
-  const completedCount = projects.filter((p) => p.status === "completed").length;
+  const completedCount = projects.filter((p) => p.status === "done").length;
   const runningCount = projects.filter((p) => p.status === "running" || p.status === "queued").length;
   const totalClips = projects.reduce((count, p) => count + p.clips.length, 0);
   const activeProjects = projects.filter((p) => p.status === "running" || p.status === "queued").slice(0, 3);
