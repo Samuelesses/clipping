@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeneratedClip, HighlightClip, ProjectState, ReframeStyle } from "@/lib/types";
 
 type ViewMode = "grid" | "list";
+type WorkspaceTab = "dashboard" | "create" | "projects" | "clips";
 
 interface RegenerateDefaults {
   vertical: boolean;
@@ -18,6 +19,7 @@ const ACTIVE_JOB_KEY = "clipping.activeJobId";
 const POLL_INTERVAL_MS = 1500;
 
 export default function Home() {
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("dashboard");
   const [urlsText, setUrlsText] = useState("");
   const [clipCount, setClipCount] = useState(5);
   const [minClipSeconds, setMinClipSeconds] = useState(20);
@@ -102,6 +104,7 @@ export default function Home() {
     setSubmitError(null);
     window.localStorage.setItem(ACTIVE_JOB_KEY, jobId);
     setActiveJobId(jobId);
+    setWorkspaceTab("projects");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -185,7 +188,8 @@ export default function Home() {
     setReviewBeforeCutting(p.options.reviewBeforeCutting);
     setShowAdvanced(true);
     setSubmitError(null);
-    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setWorkspaceTab("create");
+    requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
   function updateDraft(index: number, patch: Partial<HighlightClip>) {
@@ -240,22 +244,35 @@ export default function Home() {
   const completedCount = projects.filter((p) => p.status === "completed").length;
   const runningCount = projects.filter((p) => p.status === "running" || p.status === "queued").length;
   const totalClips = projects.reduce((count, p) => count + p.clips.length, 0);
+  const activeProjects = projects.filter((p) => p.status === "running" || p.status === "queued").slice(0, 3);
   const urlCount = urlsText.split("\n").map((u) => u.trim()).filter(Boolean).length;
 
   return (
-    <main className="studio-shell mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-5 py-10 sm:px-8">
-      <header className="studio-hero space-y-4">
+    <main className="app-layout">
+      <aside className="app-sidebar">
+        <div className="app-brand"><span className="app-brand-icon">▶</span><span>Clipping <b>Studio</b></span><small>v2.0</small></div>
+        <nav className="app-nav" aria-label="Workspace">
+          {([["dashboard", "◫", "Dashboard"], ["create", "+", "Create Project"], ["projects", "▤", "Projects"], ["clips", "▣", "Clip Library"]] as const).map(([tab, symbol, label]) => (
+            <button type="button" key={tab} onClick={() => setWorkspaceTab(tab)} className={workspaceTab === tab ? "active" : ""}><span aria-hidden="true">{symbol}</span>{label}</button>
+          ))}
+        </nav>
+        <div className="app-sidebar-foot"><span className="studio-live-dot" /> Local workspace <small>Projects saved on this device</small></div>
+      </aside>
+      <div className="app-main">
+        <div className="app-topbar"><span>CREATOR WORKSPACE <span className="topbar-divider">/</span> {workspaceTab.toUpperCase()}</span><span className="topbar-status"><span className="studio-live-dot" /> {runningCount} active jobs</span></div>
+        <div className="app-content">
+      {workspaceTab === "dashboard" && <header className="studio-hero space-y-4">
         <div className="studio-eyebrow"><span className="studio-live-dot" /> CREATOR WORKSPACE <span className="studio-version">/ STUDIO 2.0</span></div><h1 className="studio-title">Turn long videos into <span>standout moments.</span></h1>
         <p className="text-neutral-400">
           Paste one or more YouTube video or Twitch VOD links (one per line). Each downloads locally, gets
           a transcript, and asks AI to pick the best moments, cut into vertical clips with captions ready
           to post. Progress is saved as it goes, so a dropped connection never loses your place.
         </p>
-      </header>
+      </header>}
 
-      <section className="studio-stats" aria-label="Workspace overview"><div className="studio-stat"><span>PROJECTS</span><strong>{projects.length}</strong><small>{completedCount} completed</small></div><div className="studio-stat"><span>CLIPS CREATED</span><strong>{totalClips}</strong><small>Across your library</small></div><div className="studio-stat"><span>IN PROGRESS</span><strong>{runningCount}</strong><small>Background processing</small></div></section>
-      <div className="studio-section-heading"><div><span className="studio-section-kicker">01 / CREATE</span><h2>New clipping project</h2></div><span className="studio-section-hint">Start with a link. Fine-tune later.</span></div>
-      <form ref={formRef} onSubmit={handleSubmit} className="studio-panel studio-create space-y-5 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
+      {workspaceTab === "dashboard" && <section className="studio-stats" aria-label="Workspace overview"><div className="studio-stat"><span>PROJECTS</span><strong>{projects.length}</strong><small>{completedCount} completed</small></div><div className="studio-stat"><span>CLIPS CREATED</span><strong>{totalClips}</strong><small>Across your library</small></div><div className="studio-stat"><span>IN PROGRESS</span><strong>{runningCount}</strong><small>Background processing</small></div></section>}
+      {(workspaceTab === "dashboard" || workspaceTab === "create") && <div className="studio-section-heading"><div><span className="studio-section-kicker">01 / CREATE</span><h2>New clipping project</h2></div><span className="studio-section-hint">Start with a link. Fine-tune later.</span></div>}
+      {(workspaceTab === "dashboard" || workspaceTab === "create") && <form ref={formRef} onSubmit={handleSubmit} className="studio-panel studio-create space-y-5 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-2">
             <label htmlFor="urls" className="text-sm font-medium text-neutral-300">
@@ -345,9 +362,11 @@ export default function Home() {
         </button>
 
         {submitError && <p className="text-sm text-red-400">{submitError}</p>}
-      </form>
+      </form>}
 
-      {projects.length > 0 && (
+      {workspaceTab === "dashboard" && <section className="dashboard-lower"><div className="studio-panel dashboard-activity"><div className="panel-heading"><h2>Recent projects</h2><button type="button" onClick={() => setWorkspaceTab("projects")}>View all →</button></div>{projects.slice(0, 4).map((p) => <button type="button" key={p.jobId} className="dashboard-project" onClick={() => selectJob(p.jobId)}><span className="dashboard-project-icon">▣</span><span className="dashboard-project-copy"><strong>{p.title || p.url}</strong><small>{p.clips.length} clips</small></span><StatusBadge status={p.status} /></button>)}{projects.length === 0 && <p className="dashboard-empty">Your projects will appear here once you generate your first clips.</p>}</div><div className="dashboard-side"><div className="studio-panel dashboard-activity"><div className="panel-heading"><h2>Processing</h2><span className="topbar-status">{runningCount} active</span></div>{activeProjects.map((p) => <button type="button" className="dashboard-project" key={p.jobId} onClick={() => selectJob(p.jobId)}><span className="dashboard-project-icon">◷</span><span className="dashboard-project-copy"><strong>{p.title || p.url}</strong><small>{p.progress?.label || p.status}</small></span></button>)}{activeProjects.length === 0 && <p className="dashboard-empty">No active jobs. Ready when you are.</p>}</div><div className="studio-panel dashboard-activity"><div className="panel-heading"><h2>Quick actions</h2></div><div className="quick-actions"><button type="button" onClick={() => setWorkspaceTab("create")}>＋ <span>New project</span></button><button type="button" onClick={() => setWorkspaceTab("clips")}>▣ <span>Clip library</span></button></div></div></div></section>}
+
+      {(workspaceTab === "projects" || workspaceTab === "clips") && projects.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-sm font-medium text-neutral-300">Projects</h2>
           <div className="space-y-2">
@@ -394,7 +413,7 @@ export default function Home() {
         </section>
       )}
 
-      {project && (
+      {(workspaceTab === "projects" || workspaceTab === "clips") && project && (
         <>
           {project.log.length > 0 && (
             <section className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
@@ -528,7 +547,7 @@ export default function Home() {
         </>
       )}
 
-      {clips.length > 0 && (
+      {(workspaceTab === "projects" || workspaceTab === "clips") && clips.length > 0 && (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-medium">Clips ({clips.length})</h2>
@@ -611,6 +630,8 @@ export default function Home() {
           )}
         </section>
       )}
+      {workspaceTab === "clips" && !project && <p className="dashboard-empty">Select a project to view its clips.</p>}
+      </div></div>
     </main>
   );
 }
