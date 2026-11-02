@@ -16,18 +16,37 @@ interface QueuedJob {
 
 let activeCount = 0;
 const pending: QueuedJob[] = [];
-let recovered = false;
+let recoveryPromise: Promise<void> | null = null;
+const activeJobIds = new Set<string>();
+const cancelledJobIds = new Set<string>();
+
+/** Prevent new work from starting for a deleted project. Running work must finish before deletion. */
+export function isJobActive(jobId: string): boolean { return activeJobIds.has(jobId); }
+export function cancelQueuedJob(jobId: string): void {
+  cancelledJobIds.add(jobId);
+  for (let i = pending.length - 1; i >= 0; i--) {
+    if (pending[i].jobId === jobId) pending.splice(i, 1);
+  }
+}
+
+/** Start recovery from a read endpoint too, not only when submitting a new job. */
+export function ensureQueueRecovered(): void { void recoverStuckJobs(); }
 
 export function enqueueJob(jobId: string, url: string, options: ProcessOptions): void {
-  recoverStuckJobs();
-  pending.push({ jobId, url, options });
-  tryStartNext();
+  void recoverStuckJobs().then(() => {
+    if (!cancelledJobIds.has(jobId) && !activeJobIds.has(jobId) && !pending.some((job) => job.jobId === jobId)) {
+      pending.push({ jobId, url, options });
+    }
+    tryStartNext();
+  });
 }
 
 function tryStartNext(): void {
   while (activeCount < MAX_CONCURRENT_JOBS && pending.length > 0) {
     const job = pending.shift();
     if (!job) break;
+    if (cancelledJobIds.has(job.jobId) || activeJobIds.has(job.jobId)) continue;
+    activeJobIds.add(job.jobId);
     activeCount++;
     setStatus(job.jobId, "running")
       .then(() => runPipeline(job.jobId, job.url, job.options))
@@ -36,6 +55,7 @@ function tryStartNext(): void {
       })
       .finally(() => {
         activeCount--;
+        activeJobIds.delete(job.jobId);
         tryStartNext();
       });
   }
@@ -48,19 +68,20 @@ function tryStartNext(): void {
  * (see lib/pipeline.ts) means a "running" job resumes from whatever it already
  * finished rather than starting over.
  */
-function recoverStuckJobs(): void {
-  if (recovered) return;
-  recovered = true;
-  listProjects()
-    .then((projects) => {
-      for (const project of projects) {
-        if (project.status === "queued" || project.status === "running") {
-          pending.push({ jobId: project.jobId, url: project.url, options: project.options });
-        }
+function recoverStuckJobs(): Promise<void> {
+  if (recoveryPromise) return recoveryPromise;
+  recoveryPromise = listProjects().then((projects) => {
+    for (const project of projects) {
+      if ((project.status === "queued" || project.status === "running") &&
+          !cancelledJobIds.has(project.jobId) && !activeJobIds.has(project.jobId) &&
+          !pending.some((job) => job.jobId === project.jobId)) {
+        pending.push({ jobId: project.jobId, url: project.url, options: project.options });
       }
-      tryStartNext();
-    })
-    .catch(() => {
-      // Best-effort recovery - if this fails, those jobs just need a manual retry.
-    });
+    }
+    tryStartNext();
+  }).catch((error) => {
+    recoveryPromise = null;
+    console.error("Could not recover clipping queue:", error);
+  });
+  return recoveryPromise;
 }
