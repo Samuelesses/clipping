@@ -127,9 +127,12 @@ export async function findHighlights(
         end: Math.min(info.duration, snapEnd(end, segments)),
       };
     })
-    // Avoid padding short moments with unrelated dialogue just to fill a quota.\n    // A genuinely short payoff is usually better dropped than stretched into dead air.\n    .filter((clip) => clip.end - clip.start >= options.minClipSeconds)
+    // Avoid padding short moments with unrelated dialogue just to fill a quota. 
+    // A genuinely short payoff is usually better dropped than stretched into dead air. 
+    .filter((clip) => clip.end - clip.start >= options.minClipSeconds)
     .filter((clip): clip is HighlightClip => clip !== null)
-    .map((clip) => capDuration(clip, segments, options.maxClipSeconds))\n    .filter((clip) => clip.end - clip.start >= options.minClipSeconds);
+    .map((clip) => capDuration(clip, segments, options.maxClipSeconds)) 
+    .filter((clip) => clip.end - clip.start >= options.minClipSeconds);
 
   return dedupeOverlapping(clips).slice(0, candidateCount);
 }
