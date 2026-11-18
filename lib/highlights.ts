@@ -36,6 +36,7 @@ export async function findHighlights(
   segments: TranscriptSegment[],
   info: VideoInfo,
   options: ProcessOptions,
+  candidateCount = options.clipCount,
 ): Promise<HighlightClip[]> {
   const client = new OpenAI();
   const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
@@ -46,7 +47,7 @@ export async function findHighlights(
 
   // Ask for a few extra candidates - overlap dedup below can drop some, and this keeps
   // the final count close to what was actually requested.
-  const requestCount = Math.min(options.clipCount + 3, 20);
+  const requestCount = Math.min(Math.max(candidateCount + 3, options.clipCount), 20);
 
   const completion = await client.chat.completions.parse({
     model,
@@ -130,7 +131,7 @@ export async function findHighlights(
     .filter((clip): clip is HighlightClip => clip !== null)
     .map((clip) => capDuration(clip, segments, options.maxClipSeconds))\n    .filter((clip) => clip.end - clip.start >= options.minClipSeconds);
 
-  return dedupeOverlapping(clips).slice(0, options.clipCount);
+  return dedupeOverlapping(clips).slice(0, candidateCount);
 }
 
 // The prompt asks the model to never come in under the requested minimum, but (like the
