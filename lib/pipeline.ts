@@ -3,6 +3,7 @@ import path from "path";
 import { fetchCaptions } from "./captions";
 import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
+import { rankVisualHighlights } from "./visualHighlights";
 import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, updateClip } from "./projects";
 import { withRetry } from "./retry";
 import { writeClipAss } from "./subtitles";
@@ -63,7 +64,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     const segments = await ensureTranscript(jobId, workDir, url, videoPath, log);
 
     await log(`Transcript ready (${segments.length} segments). Asking the model to find the best parts...`);
-    const highlights = await ensureHighlights(jobId, workDir, segments, info, options, log);
+    const highlights = await ensureHighlights(jobId, workDir, videoPath, segments, info, options, log);
 
     if (highlights.length === 0) {
       throw new Error("The model didn't return any candidate clips - try a different video or lower the clip count.");
@@ -385,6 +386,7 @@ export async function ensureTranscript(
 export async function ensureHighlights(
   jobId: string,
   workDir: string,
+  videoPath: string,
   segments: TranscriptSegment[],
   info: VideoInfo,
   options: ProcessOptions,
@@ -401,9 +403,23 @@ export async function ensureHighlights(
     return cached;
   }
 
-  const highlights = await withRetry(() => findHighlights(segments, info, options), {
+  // Shortlist more candidates than requested, then inspect actual gameplay frames.
+  const candidateCount = Math.min(20, Math.max(options.clipCount, options.clipCount * 2));
+  const candidates = await withRetry(() => findHighlights(segments, info, options, candidateCount), {
     onRetry: (attempt) => log(`Highlight selection failed - retrying (attempt ${attempt + 1})...`),
   });
+  let highlights = candidates.slice(0, options.clipCount);
+  if (process.env.VISUAL_REVIEW_ENABLED !== "false" && candidates.length > 1) {
+    try {
+      await log(`Inspecting gameplay screenshots for ${candidates.length} candidate clips...`);
+      highlights = await rankVisualHighlights(videoPath, workDir, candidates, options.clipCount);
+      await log("Gameplay-aware candidate ranking complete.");
+    } catch (err) {
+      // Vision is an enhancement; a failed visual analysis must not ruin a full VOD job.
+      const message = err instanceof Error ? err.message : String(err);
+      await log(`Visual ranking unavailable (${message}). Using transcript ranking instead.`);
+    }
+  }
   await fs.writeFile(highlightsPath, JSON.stringify(highlights), "utf8");
   return highlights;
 }
