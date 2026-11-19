@@ -100,7 +100,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     const clipsDir = path.join(PUBLIC_CLIPS_DIR, jobId);
     await fs.mkdir(clipsDir, { recursive: true });
 
-    const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, options.vertical, burnCaptions);
+    const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, options.vertical, burnCaptions, options.reframeStyle);
 
     // Resume support: a prior attempt may have already cut and recorded some clips
     // before failing later on - pick up right after the last one.
@@ -163,11 +163,15 @@ async function computeCaptionCanvas(
   videoPath: string,
   vertical: boolean,
   burnCaptions: boolean,
+  reframeStyle: ReframeStyle = "blur",
 ): Promise<{ captionCanvas: { width: number; height: number } | null; videoBottomY: number | null }> {
   if (!burnCaptions) return { captionCanvas: null, videoBottomY: null };
 
   if (vertical) {
     const captionCanvas = { width: 1080, height: 1920 };
+    if (reframeStyle === "gaming") {
+      return { captionCanvas, videoBottomY: 1480 };
+    }
     const sourceDims = await getVideoDimensions(videoPath);
     const fgHeight = Math.round((captionCanvas.width * sourceDims.height) / sourceDims.width / 2) * 2;
     const fgTop = Math.round((captionCanvas.height - fgHeight) / 2);
@@ -246,7 +250,7 @@ export async function regenerateClip(
   await fs.mkdir(scratchDir, { recursive: true });
 
   try {
-    const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, vertical, burnCaptions);
+    const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, vertical, burnCaptions, reframeStyle);
 
     let subtitlesPath: string | undefined;
     if (captionCanvas) {
