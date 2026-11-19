@@ -20,12 +20,12 @@ const POLL_INTERVAL_MS = 1500;
 export default function Home() {
   const [urlsText, setUrlsText] = useState("");
   const [clipCount, setClipCount] = useState(5);
-  const [minClipSeconds, setMinClipSeconds] = useState(20);
-  const [maxClipSeconds, setMaxClipSeconds] = useState(120);
+  const [minClipSeconds, setMinClipSeconds] = useState(12);
+  const [maxClipSeconds, setMaxClipSeconds] = useState(55);
   const [vertical, setVertical] = useState(true);
   const [reframeStyle, setReframeStyle] = useState<ReframeStyle>("blur");
   const [burnCaptions, setBurnCaptions] = useState(true);
-  const [animatedCaptions, setAnimatedCaptions] = useState(false);
+  const [animatedCaptions, setAnimatedCaptions] = useState(true);
   const [reviewBeforeCutting, setReviewBeforeCutting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
