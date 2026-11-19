@@ -1,6 +1,6 @@
 import fs from "fs";
 import fsp from "fs/promises";
-import OpenAI from "openai";
+import { createOpenAIClient } from "./openaiKey";
 import { getMediaDuration, splitAudioIntoChunks } from "./ffmpeg";
 import type { TranscriptSegment, TranscriptWord } from "./types";
 
@@ -33,7 +33,7 @@ export async function transcribeAudio(
 }
 
 async function transcribeFile(filePath: string, offsetSeconds: number): Promise<TranscriptSegment[]> {
-  const client = new OpenAI();
+  const client = await createOpenAIClient();
   const response = await client.audio.transcriptions.create({
     file: fs.createReadStream(filePath),
     model: "whisper-1",
