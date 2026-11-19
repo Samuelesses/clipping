@@ -16,6 +16,7 @@ export interface RunOptions {
    * line-aligned - so a caller can parse live progress out of a long-running command
    * (e.g. yt-dlp's own download percentage) instead of only seeing output at the end. */
   onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
 }
 
 export async function run(command: string, args: string[], options: RunOptions = {}): Promise<string> {
@@ -30,7 +31,9 @@ export async function run(command: string, args: string[], options: RunOptions =
       options.onStdout?.(text);
     });
     child.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
+      const text = data.toString();
+      stderr += text;
+      options.onStderr?.(text);
     });
 
     child.on("error", (err) => {
