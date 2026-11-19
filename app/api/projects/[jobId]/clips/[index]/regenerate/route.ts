@@ -39,6 +39,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   }
   if (typeof body?.burnCaptions === "boolean") overrides.burnCaptions = body.burnCaptions;
   if (typeof body?.animatedCaptions === "boolean") overrides.animatedCaptions = body.animatedCaptions;
+  if (typeof body?.extendStartSeconds === "number" && Number.isFinite(body.extendStartSeconds) && body.extendStartSeconds >= 0 && body.extendStartSeconds <= 30) overrides.extendStartSeconds = body.extendStartSeconds;
+  if (typeof body?.extendEndSeconds === "number" && Number.isFinite(body.extendEndSeconds) && body.extendEndSeconds >= 0 && body.extendEndSeconds <= 30) overrides.extendEndSeconds = body.extendEndSeconds;
 
   try {
     const clip = await regenerateClip(jobId, clipIndex, overrides);
