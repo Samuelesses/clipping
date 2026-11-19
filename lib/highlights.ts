@@ -2,6 +2,7 @@ import { createOpenAIClient } from "./openaiKey";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import type { HighlightClip, ProcessOptions, TranscriptSegment, VideoInfo } from "./types";
+import { getReviewWindow } from "./reviewRange";
 
 const DEFAULT_MODEL = "gpt-5.1";
 
@@ -38,6 +39,7 @@ export async function findHighlights(
   options: ProcessOptions,
   candidateCount = options.clipCount,
 ): Promise<HighlightClip[]> {
+  const reviewWindow = getReviewWindow(options, info.duration);
   const client = await createOpenAIClient();
   const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
 
@@ -96,7 +98,8 @@ export async function findHighlights(
         role: "user",
         content:
           `Video title: ${info.title}\n` +
-          `Video duration: ${formatTime(info.duration)} (${Math.round(info.duration)} seconds)\n\n` +
+          `Video duration: ${formatTime(info.duration)} (${Math.round(info.duration)} seconds)\n` +
+          `ONLY select moments between ${reviewWindow.start} and ${reviewWindow.end} seconds of the ORIGINAL video.\n\n` +
           `Transcript with timestamps:\n${transcript}\n\n` +
           `Pick ${requestCount} of the best, most engaging, self-contained moments to turn into clips, ` +
           `drawn from different parts of the video. Each clip must be between ${options.minClipSeconds} and ` +
@@ -119,8 +122,8 @@ export async function findHighlights(
   const clips = parsed.clips
     .filter((clip) => clip.end > clip.start)
     .map((clip) => {
-      const start = Math.max(0, clip.start);
-      const end = Math.min(info.duration, clip.end);
+      const start = Math.max(reviewWindow.start, clip.start);
+      const end = Math.min(reviewWindow.end, clip.end);
       return {
         ...clip,
         start: Math.max(0, snapStart(start, segments)),
@@ -129,7 +132,7 @@ export async function findHighlights(
     })
     // Avoid padding short moments with unrelated dialogue just to fill a quota. 
     // A genuinely short payoff is usually better dropped than stretched into dead air. 
-    .filter((clip) => clip.end - clip.start >= options.minClipSeconds)
+    .filter((clip) => clip.end > clip.start && clip.end - clip.start >= options.minClipSeconds)
     .filter((clip): clip is HighlightClip => clip !== null)
     .map((clip) => capDuration(clip, segments, options.maxClipSeconds)) 
     .filter((clip) => clip.end - clip.start >= options.minClipSeconds);
