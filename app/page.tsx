@@ -13,7 +13,10 @@ interface RegenerateDefaults {
   animatedCaptions: boolean;
 }
 
-type RegenerateOverrides = Partial<RegenerateDefaults>;
+interface RegenerateOverrides extends Partial<RegenerateDefaults> {
+  extendStartSeconds?: number;
+  extendEndSeconds?: number;
+}
 
 const ACTIVE_JOB_KEY = "clipping.activeJobId";
 const POLL_INTERVAL_MS = 1500;
@@ -965,6 +968,8 @@ function RegeneratePanel({
   const [reframeStyle, setReframeStyle] = useState(defaultOptions.reframeStyle);
   const [burnCaptions, setBurnCaptions] = useState(defaultOptions.burnCaptions);
   const [animatedCaptions, setAnimatedCaptions] = useState(defaultOptions.animatedCaptions);
+  const [extendStartSeconds, setExtendStartSeconds] = useState(0);
+  const [extendEndSeconds, setExtendEndSeconds] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -984,7 +989,7 @@ function RegeneratePanel({
     setSubmitting(true);
     setError(null);
     try {
-      await onRegenerate({ vertical, reframeStyle, burnCaptions, animatedCaptions });
+      await onRegenerate({ vertical, reframeStyle, burnCaptions, animatedCaptions, extendStartSeconds, extendEndSeconds });
       setOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not regenerate this clip.");
@@ -996,7 +1001,7 @@ function RegeneratePanel({
   return (
     <div className="space-y-3 rounded-lg border border-neutral-800 bg-neutral-950 p-3">
       <p className="text-xs text-neutral-500">
-        Re-renders this exact moment (same start/end, title, caption) with different settings -
+        Rebuilds this moment with the new GTA layout and optional extra setup/payoff -
         doesn't touch any other clip.
       </p>
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
@@ -1013,7 +1018,12 @@ function RegeneratePanel({
       {burnCaptions && (
         <CheckboxField label="Animated word-by-word captions" checked={animatedCaptions} onChange={setAnimatedCaptions} />
       )}
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        <NumberField label="Extra seconds before" value={extendStartSeconds} onChange={setExtendStartSeconds} min={0} max={30} />
+        <NumberField label="Extra seconds after" value={extendEndSeconds} onChange={setExtendEndSeconds} min={0} max={30} />
+      </div>
+      <p className="text-xs text-neutral-500">Extends footage by up to 30 seconds on each side without crossing the selected review range.</p>
+      {error && <p className="text-sm text-red-400">{error}</p>
       <div className="flex items-center gap-3">
         <button
           type="button"
