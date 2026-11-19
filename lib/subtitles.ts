@@ -225,8 +225,14 @@ export async function writeGtaHookText(title: string, outPath: string): Promise<
   let first = "";
   let second = "";
   for (const word of words) {
-    if (!second && (first + " " + word).trim().length <= 19) first = (first + " " + word).trim();
-    else second = (second + " " + word).trim();
+    const firstCandidate = (first + " " + word).trim();
+    if (!second && firstCandidate.length <= 18) {
+      first = firstCandidate;
+      continue;
+    }
+    const secondCandidate = (second + " " + word).trim();
+    if (secondCandidate.length <= 20) second = secondCandidate;
+    else break; // Prefer a readable hook over overflowing the portrait frame.
   }
   await fs.writeFile(outPath, [first, second].filter(Boolean).join("\n"), "utf8");
 }
