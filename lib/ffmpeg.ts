@@ -275,33 +275,26 @@ export async function cutClip(
 
   if (options.vertical) {
     if (options.reframeStyle === "gaming") {
-      // 1080x1920 portrait layout. All meaningful text stays between y=250..1300
-      // and x=100..820, away from TikTok's top bar, right action rail and caption tray.
-      // Keep gameplay visible low down, but never position text in the app chrome.
+      // Full-bleed GTA portrait split: streamer on top, game fills the rest.
+      // No black letterboxing. TikTok overlays reserve the lower-right and bottom.
       const cam = options.facecam;
       if (cam) {
-        const x = cam.x.toFixed(4), y = cam.y.toFixed(4);
-        const w = cam.w.toFixed(4), h = cam.h.toFixed(4);
-        const camLeft = cam.x + cam.w / 2 < 0.5;
-        // Exclude the source webcam/chat side from the gameplay panel.
-        const gameX = camLeft ? Math.min(0.43, cam.x + cam.w + 0.012) : 0;
-        const gameWidth = camLeft ? 1-gameX : Math.max(0.55,cam.x-0.012);
+        const { x, y, w, h } = cam;
+        const camLeft = x + w / 2 < 0.5;
+        const gameX = camLeft ? Math.min(0.42, x + w + 0.008) : 0;
+        const gameW = camLeft ? 1 - gameX : Math.max(0.58, x - 0.008);
         filters.push(
-          `${videoLabel}split=3[camSrc][gameSrc][bgSrc]`,
-          "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=42,eq=brightness=-0.35:saturation=0.7[bg]",
-          `[camSrc]crop=w=iw*${w}:h=ih*${h}:x=iw*${x}:y=ih*${y},scale=850:350:force_original_aspect_ratio=increase,crop=850:350[cam]`,
-          `[gameSrc]crop=w=iw*${gameWidth.toFixed(4)}:h=ih*0.96:x=iw*${gameX.toFixed(4)}:y=ih*0.02,scale=1080:930:force_original_aspect_ratio=increase,crop=1080:930[game]`,
-          "[bg][cam]overlay=65:245:shortest=1[withCam]",
-          "[withCam][game]overlay=0:790:shortest=1[stacked]",
-          "[stacked]drawbox=x=64:y=601:w=852:h=5:color=0xFFCB87:t=fill[vertical]",
+          `${videoLabel}split=3[camSrc][gameSrc][canvasSrc]`,
+          "[canvasSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[canvas]",
+          `[camSrc]crop=w=iw*${w.toFixed(5)}:h=ih*${h.toFixed(5)}:x=iw*${x.toFixed(5)}:y=ih*${y.toFixed(5)},scale=1080:540:force_original_aspect_ratio=increase,crop=1080:540[cam]`,
+          `[gameSrc]crop=w=iw*${gameW.toFixed(5)}:h=ih*0.98:x=iw*${gameX.toFixed(5)}:y=ih*0.01,scale=1080:1380:force_original_aspect_ratio=increase,crop=1080:1380[game]`,
+          "[canvas][game]overlay=0:540:shortest=1[withGame]",
+          "[withGame][cam]overlay=0:0:shortest=1,drawbox=x=0:y=537:w=1080:h=6:color=black@0.88:t=fill[vertical]",
         );
       } else {
-        // Never fake a facecam position: if detection isn't confident, show only the game.
+        // When no webcam is detected, gameplay fills the ENTIRE portrait.
         filters.push(
-          `${videoLabel}split=2[gameSrc][bgSrc]`,
-          "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=42,eq=brightness=-0.35:saturation=0.7[bg]",
-          "[gameSrc]scale=1080:1280:force_original_aspect_ratio=increase,crop=1080:1280[game]",
-          "[bg][game]overlay=0:350:shortest=1[vertical]",
+          `${videoLabel}scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[vertical]`,
         );
       }
     } else if (options.reframeStyle === "crop") {
@@ -327,7 +320,7 @@ export async function cutClip(
       `textfile='${escapeForFilterGraph(options.hookTextPath)}':` +
       "fontsize=76:fontcolor=white:borderw=6:bordercolor=black@0.97:" +
       "shadowcolor=black@0.8:shadowx=3:shadowy=4:line_spacing=5:" +
-      "x=(w-text_w)/2:y=650:enable='between(t,0,3)'[titled]",
+      "x=(w-text_w)/2:y=570:enable='between(t,0,3)'[titled]",
     );
     videoLabel = "[titled]";
   }
@@ -346,7 +339,7 @@ export async function cutClip(
         `textfile='${escapeForFilterGraph(caption.textPath)}':` +
         `fontsize=60:fontcolor=${color}:borderw=5:bordercolor=black@0.97:` +
         `shadowx=3:shadowy=4:shadowcolor=black@0.8:line_spacing=8:` +
-        `x=(w-text_w)/2:y=1110:enable='between(t,${from},${to})'${outLabel}`,
+        `x=(w-text_w)/2:y=1180:enable='between(t,${from},${to})'${outLabel}`,
       );
       videoLabel = outLabel;
     });
