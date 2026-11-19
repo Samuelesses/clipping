@@ -109,6 +109,24 @@ queue and start automatically as slots free up. That means:
 - [`ffmpeg`](https://ffmpeg.org/download.html) (includes `ffprobe`) on your PATH
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
+## macOS: Full FFmpeg for GTA titles and captions
+
+The standard Homebrew `ffmpeg` 9 installation may exclude both the
+`drawtext` filter and `ass`/libass. GTA hooks require `drawtext`; animated
+word captions need `ass`. Install the full Homebrew build:
+
+```bash
+brew install ffmpeg-full
+$(brew --prefix ffmpeg-full)/bin/ffmpeg -hide_banner -filters | grep -E ' drawtext | ass '
+```
+
+Clipping automatically prefers `ffmpeg-full` from Homebrew's installed keg on
+macOS, even if a different `ffmpeg` appears first on `PATH`. Restart the
+Next.js dev server after installation. For older failed projects, click **Retry**:
+the source video, cached transcript and candidate highlights are reused. The
+app now checks text-filter availability before downloading/paid processing and
+shows an actionable message rather than the raw FFmpeg stack trace.
+
 ## Vicecut: GTA-first video editing
 
 The UI now uses a GTA/Vice-inspired sunset colour palette, and new clips default
