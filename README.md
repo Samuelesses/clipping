@@ -137,8 +137,11 @@ with the webcam on the **left**:
 
 Old clips are **not** modified automatically. In the clip library, use
 **Regenerate clip → Vicecut layout** to apply the new composition, hook and pacing
-to an existing moment. Regeneration doesn't choose a new start/end; to change the
-story boundary, edit highlights in **Review before cutting** on a new project.
+to an existing moment. If the saved clip cuts off before the payoff, use the new
+**Extra seconds before/after** controls (0–30 seconds each) to extend its boundaries
+without rerunning AI selection. Extensions are capped at the original review range.
+For precise arbitrary timestamps, edit highlights in **Review before cutting** on
+a new project.
 The webcam crop is a preset, **not automatic tracking**, and may need adjustment
 for a different streamer's layout. The original Blur padding and Crop to fill
 layouts are still available.
