@@ -45,8 +45,9 @@ export async function writeClipAss(
   outPath: string,
   videoBottomY: number | null = null,
   animated = false,
+  gtaMode = false,
 ): Promise<void> {
-  const captionFontSize = Math.round(canvasHeight * 0.038);
+  const captionFontSize = Math.round(canvasHeight * (gtaMode ? 0.041 : 0.038));
   const titleFontSize = Math.round(canvasHeight * 0.062);
   const titleMarginV = Math.round(canvasHeight * 0.09);
   const sideMargin = Math.round(canvasWidth * 0.06);
@@ -60,8 +61,8 @@ export async function writeClipAss(
   // room for the text instead of pushing it off-screen.
   const captionGap = Math.round(canvasHeight * 0.02);
   const maxCaptionMarginV = canvasHeight - Math.round(captionFontSize * 2.6);
-  const captionAlignment = videoBottomY !== null ? 8 : 2;
-  const captionMarginV =
+  const captionAlignment = gtaMode ? 2 : (videoBottomY !== null ? 8 : 2);
+  const captionMarginV = gtaMode ? 72 :
     videoBottomY !== null ? Math.min(videoBottomY + captionGap, maxCaptionMarginV) : Math.round(canvasHeight * 0.1);
 
   // Bright gold title (classic high-contrast "clip title" look), clean white captions -
@@ -95,7 +96,7 @@ export async function writeClipAss(
 
   // Show the title briefly so it does not obscure the gameplay payoff.
   const titleSeconds = Math.min(4.5, Math.max(0.5, clipEnd - clipStart));
-  const titleLine = `Dialogue: 0,${formatAssTime(0)},${formatAssTime(titleSeconds)},Title,,0,0,0,,${truncateTitle(title)}\n`;
+  const titleLine = gtaMode ? "" : `Dialogue: 0,${formatAssTime(0)},${formatAssTime(titleSeconds)},Title,,0,0,0,,${truncateTitle(title)}\n`;
 
   const wordChunks = animated ? buildWordChunks(segments, clipStart, clipEnd) : null;
   const captionLines = wordChunks
@@ -212,4 +213,20 @@ function formatAssTime(totalSeconds: number): string {
   const centis = totalCentis % 100;
   const pad = (n: number, len = 2) => n.toString().padStart(len, "0");
   return `${hours}:${pad(minutes)}:${pad(seconds)}.${pad(centis)}`;
+}
+
+/** A short, deliberate two-line opening hook rendered by drawtext independently of libass. */
+export async function writeGtaHookText(title: string, outPath: string): Promise<void> {
+  const cleaned = title.toUpperCase()
+    .normalize("NFKD")
+    .replace(/[^A-Z0-9?!'& -]/g, "")
+    .replace(/\\s+/g, " ").trim().slice(0, 48) || "GTA MOMENT";
+  const words = cleaned.split(" ");
+  let first = "";
+  let second = "";
+  for (const word of words) {
+    if (!second && (first + " " + word).trim().length <= 19) first = (first + " " + word).trim();
+    else second = (second + " " + word).trim();
+  }
+  await fs.writeFile(outPath, [first, second].filter(Boolean).join("\\n"), "utf8");
 }
