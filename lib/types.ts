@@ -32,7 +32,7 @@ export interface GeneratedClip extends HighlightClip {
   url: string;
 }
 
-export type ReframeStyle = "blur" | "crop";
+export type ReframeStyle = "blur" | "crop" | "gaming";
 
 export interface ProcessOptions {
   url: string;
