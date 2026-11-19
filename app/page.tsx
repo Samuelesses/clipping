@@ -40,7 +40,7 @@ export default function Home() {
   const [reviewStartText, setReviewStartText] = useState("00:00:00");
   const [reviewEndText, setReviewEndText] = useState("");
   const [minClipSeconds, setMinClipSeconds] = useState(12);
-  const [maxClipSeconds, setMaxClipSeconds] = useState(55);
+  const [maxClipSeconds, setMaxClipSeconds] = useState(75);
   const [vertical, setVertical] = useState(true);
   const [reframeStyle, setReframeStyle] = useState<ReframeStyle>("gaming");
   const [burnCaptions, setBurnCaptions] = useState(true);
@@ -359,7 +359,7 @@ export default function Home() {
   return (
     <main className="app-layout">
       <aside className="app-sidebar">
-        <div className="app-brand"><span className="app-brand-icon">▶</span><span>Clipping <b>Studio</b></span><small>v2.0</small></div>
+        <div className="app-brand"><span className="app-brand-icon">▶</span><span>VICE<b>CUT</b></span><small>GTA</small></div>
         <nav className="app-nav" aria-label="Workspace">
           {([["dashboard", "◫", "Dashboard"], ["create", "+", "Create Project"], ["projects", "▤", "Projects"], ["clips", "▣", "Clip Library"], ["settings", "⚙", "Settings"]] as const).map(([tab, symbol, label]) => (
             <button type="button" key={tab} onClick={() => setWorkspaceTab(tab)} className={workspaceTab === tab ? "active" : ""}><span aria-hidden="true">{symbol}</span>{label}</button>
@@ -368,7 +368,7 @@ export default function Home() {
         <div className="app-sidebar-foot"><span className="studio-live-dot" /> Local workspace <small>Projects saved on this device</small></div>
       </aside>
       <div className="app-main">
-        <div className="app-topbar"><span>CREATOR WORKSPACE <span className="topbar-divider">/</span> {workspaceTab.toUpperCase()}</span><span className="topbar-status"><span className="studio-live-dot" /> {runningCount} active jobs</span></div>
+        <div className="app-topbar"><span>GTA CLIP STUDIO <span className="topbar-divider">/</span> {workspaceTab.toUpperCase()}</span><span className="topbar-status"><span className="studio-live-dot" /> {runningCount} active jobs</span></div>
         <div className="app-content">
       {workspaceTab === "dashboard" && apiKeyConfigured === false && (
         <div className="studio-panel rounded-xl border border-amber-700/50 bg-amber-950/20 p-4 text-sm text-amber-200">
@@ -377,7 +377,7 @@ export default function Home() {
         </div>
       )}
       {workspaceTab === "dashboard" && <header className="studio-hero space-y-4">
-        <div className="studio-eyebrow"><span className="studio-live-dot" /> CREATOR WORKSPACE <span className="studio-version">/ STUDIO 2.0</span></div><h1 className="studio-title">Turn long videos into <span>standout moments.</span></h1>
+        <div className="studio-eyebrow"><span className="studio-live-dot" /> VICE CITY EDITION <span className="studio-version">/ SHORT-FORM LAB</span></div><h1 className="studio-title">Every GTA moment has <span>a story worth clipping.</span></h1>
         <p className="text-neutral-400">
           Paste one or more YouTube video or Twitch VOD links (one per line). Each downloads locally, gets
           a transcript, and asks AI to pick the best moments, cut into vertical clips with captions ready
@@ -428,7 +428,7 @@ export default function Home() {
           </div>
         </section>
       )}
-      {(workspaceTab === "dashboard" || workspaceTab === "create") && <div className="studio-section-heading"><div><span className="studio-section-kicker">01 / CREATE</span><h2>New clipping project</h2></div><span className="studio-section-hint">Start with a link. Fine-tune later.</span></div>}
+      {(workspaceTab === "dashboard" || workspaceTab === "create") && <div className="studio-section-heading"><div><span className="studio-section-kicker">01 / CREATE</span><h2>New GTA clipping session</h2></div><span className="studio-section-hint">Start with a link. Fine-tune later.</span></div>}
       {(workspaceTab === "dashboard" || workspaceTab === "create") && <form ref={formRef} onSubmit={handleSubmit} className="studio-panel studio-create space-y-5 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-2">
@@ -499,7 +499,7 @@ export default function Home() {
                 <span className="text-sm font-medium text-neutral-300">Vertical reframe style</span>
                 <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
                   <RadioField
-                    label="Gaming split (enlarged left-side facecam and gameplay)"
+                    label="Vicecut layout (GTA facecam + gameplay)"
                     checked={reframeStyle === "gaming"}
                     onChange={() => setReframeStyle("gaming")}
                   />
@@ -1005,7 +1005,7 @@ function RegeneratePanel({
       </div>
       {vertical && (
         <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
-          <RadioField label="Gaming split (left-side facecam)" checked={reframeStyle === "gaming"} onChange={() => setReframeStyle("gaming")} />
+          <RadioField label="Vicecut layout (GTA facecam + gameplay)" checked={reframeStyle === "gaming"} onChange={() => setReframeStyle("gaming")} />
           <RadioField label="Blur padding" checked={reframeStyle === "blur"} onChange={() => setReframeStyle("blur")} />
           <RadioField label="Crop to fill" checked={reframeStyle === "crop"} onChange={() => setReframeStyle("crop")} />
         </div>
