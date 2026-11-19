@@ -47,12 +47,12 @@ export async function checkDependencies(): Promise<void> {
 function parseDuration(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
   if (typeof value !== "string") return null;
-  if (/^\\d+(?:\\.\\d+)?$/.test(value)) {
+  if (/^\d+(?:\.\d+)?$/.test(value)) {
     const n = Number(value);
     return n > 0 && Number.isFinite(n) ? n : null;
   }
   const parts = value.split(":");
-  if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\\d+$/.test(p))) return null;
+  if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\d+$/.test(p))) return null;
   const nums = parts.map(Number);
   const total = nums.reduce((acc, part) => acc * 60 + part, 0);
   return total > 0 && Number.isFinite(total) ? total : null;
