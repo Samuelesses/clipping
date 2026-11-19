@@ -327,7 +327,7 @@ export async function cutClip(
       `textfile='${escapeForFilterGraph(options.hookTextPath)}':` +
       "fontsize=76:fontcolor=white:borderw=6:bordercolor=black@0.97:" +
       "shadowcolor=black@0.8:shadowx=3:shadowy=4:line_spacing=5:" +
-      "x=max(100,(940-text_w)/2):y=650:enable='between(t,0,3)'[titled]",
+      "x=(w-text_w)/2:y=650:enable='between(t,0,3)'[titled]",
     );
     videoLabel = "[titled]";
   }
@@ -346,7 +346,7 @@ export async function cutClip(
         `textfile='${escapeForFilterGraph(caption.textPath)}':` +
         `fontsize=60:fontcolor=${color}:borderw=5:bordercolor=black@0.97:` +
         `shadowx=3:shadowy=4:shadowcolor=black@0.8:line_spacing=8:` +
-        `x=max(110,(920-text_w)/2):y=1110:enable='between(t,${from},${to})'${outLabel}`,
+        `x=(w-text_w)/2:y=1110:enable='between(t,${from},${to})'${outLabel}`,
       );
       videoLabel = outLabel;
     });
