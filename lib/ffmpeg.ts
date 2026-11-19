@@ -210,6 +210,7 @@ export interface CutClipOptions {
   hookTextPath?: string;
   /** Absolute source-video intervals to retain after removing genuinely quiet gaps. */
   keepRanges?: KeepRange[];
+  fallbackCaptions?: Array<{ start: number; end: number; textPath: string }>;
 }
 
 export async function cutClip(
@@ -291,6 +292,26 @@ export async function cutClip(
       "x=(w-text_w)/2:y=65:enable='between(t,0,2.7)'[titled]",
     );
     videoLabel = "[titled]";
+  }
+
+  // A functional caption track for FFmpeg builds that lack the libass/ass filter.
+  // Each phrase is shown only for its own interval on the edited timeline.
+  if (options.fallbackCaptions?.length) {
+    const font = path.join(FONTS_DIR, "Montserrat-ExtraBold.ttf");
+    options.fallbackCaptions.forEach((caption, i) => {
+      const from = Math.max(0, caption.start).toFixed(2);
+      const to = Math.max(0, caption.end).toFixed(2);
+      const color = i % 4 === 0 ? "0xFFCB87" : "white";
+      const outLabel = `[fallbackCaption${i}]`;
+      filters.push(
+        `${videoLabel}drawtext=fontfile='${escapeForFilterGraph(font)}':` +
+        `textfile='${escapeForFilterGraph(caption.textPath)}':` +
+        `fontsize=65:fontcolor=${color}:borderw=5:bordercolor=black@0.97:` +
+        `shadowx=3:shadowy=4:shadowcolor=black@0.8:line_spacing=8:` +
+        `x=(w-text_w)/2:y=h-190:enable='between(t,${from},${to})'${outLabel}`,
+      );
+      videoLabel = outLabel;
+    });
   }
 
   if (options.subtitlesPath) {
