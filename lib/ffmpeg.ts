@@ -5,6 +5,8 @@ import { randomUUID } from "crypto";
 import { run } from "./exec";
 import type { ReframeStyle } from "./types";
 import type { KeepRange } from "./pacing";
+import type { FacecamBox } from "./facecam";
+import { getGtaFontPath } from "./gtaFont";
 
 // Bundled fonts (see fonts/README.md) so burned-in text looks the same on every
 // machine, regardless of what's installed locally - see lib/subtitles.ts for the
@@ -228,6 +230,7 @@ export interface CutClipOptions {
   /** Absolute source-video intervals to retain after removing genuinely quiet gaps. */
   keepRanges?: KeepRange[];
   fallbackCaptions?: Array<{ start: number; end: number; textPath: string }>;
+  facecam?: FacecamBox | null;
 }
 
 export async function cutClip(
@@ -272,17 +275,35 @@ export async function cutClip(
 
   if (options.vertical) {
     if (options.reframeStyle === "gaming") {
-      // Vice-inspired GTA layout; facecam and gameplay are independent crops.
-      // Unlike the old layout the gameplay excludes the left streamer/chat column.
-      filters.push(
-        `${videoLabel}split=3[camSrc][gameSrc][bgSrc]`,
-        "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=50,eq=brightness=-0.30:saturation=0.65[bg]",
-        "[camSrc]crop=w=iw*0.205:h=ih*0.38:x=iw*0.025:y=ih*0.19,scale=890:410:force_original_aspect_ratio=increase,crop=890:410[cam]",
-        "[gameSrc]crop=w=iw*0.73:h=ih*0.96:x=iw*0.27:y=ih*0.02,scale=1080:1050:force_original_aspect_ratio=increase,crop=1080:1050[game]",
-        "[bg][cam]overlay=(W-w)/2:285:shortest=1[withCam]",
-        "[withCam][game]overlay=(W-w)/2:725:shortest=1[stacked]",
-        "[stacked]drawbox=x=0:y=0:w=1080:h=13:color=0xF46EA1:t=fill,drawbox=x=95:y=699:w=890:h=8:color=0xF8C976:t=fill,drawbox=x=0:y=1775:w=1080:h=7:color=0x69D8DA:t=fill[vertical]",
-      );
+      // 1080x1920 portrait layout. All meaningful text stays between y=250..1300
+      // and x=100..820, away from TikTok's top bar, right action rail and caption tray.
+      // Keep gameplay visible low down, but never position text in the app chrome.
+      const cam = options.facecam;
+      if (cam) {
+        const x = cam.x.toFixed(4), y = cam.y.toFixed(4);
+        const w = cam.w.toFixed(4), h = cam.h.toFixed(4);
+        const camLeft = cam.x + cam.w / 2 < 0.5;
+        // Exclude the source webcam/chat side from the gameplay panel.
+        const gameX = camLeft ? Math.min(0.43, cam.x + cam.w + 0.012) : 0;
+        const gameWidth = camLeft ? 1-gameX : Math.max(0.55,cam.x-0.012);
+        filters.push(
+          `${videoLabel}split=3[camSrc][gameSrc][bgSrc]`,
+          "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=42,eq=brightness=-0.35:saturation=0.7[bg]",
+          `[camSrc]crop=w=iw*${w}:h=ih*${h}:x=iw*${x}:y=ih*${y},scale=850:350:force_original_aspect_ratio=increase,crop=850:350[cam]`,
+          `[gameSrc]crop=w=iw*${gameWidth.toFixed(4)}:h=ih*0.96:x=iw*${gameX.toFixed(4)}:y=ih*0.02,scale=1080:930:force_original_aspect_ratio=increase,crop=1080:930[game]`,
+          "[bg][cam]overlay=65:245:shortest=1[withCam]",
+          "[withCam][game]overlay=0:790:shortest=1[stacked]",
+          "[stacked]drawbox=x=64:y=601:w=852:h=5:color=0xFFCB87:t=fill[vertical]",
+        );
+      } else {
+        // Never fake a facecam position: if detection isn't confident, show only the game.
+        filters.push(
+          `${videoLabel}split=2[gameSrc][bgSrc]`,
+          "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=42,eq=brightness=-0.35:saturation=0.7[bg]",
+          "[gameSrc]scale=1080:1280:force_original_aspect_ratio=increase,crop=1080:1280[game]",
+          "[bg][game]overlay=0:350:shortest=1[vertical]",
+        );
+      }
     } else if (options.reframeStyle === "crop") {
       filters.push(
         `${videoLabel}crop=w='if(gt(iw/ih,9/16),ih*9/16,iw)':h='if(gt(iw/ih,9/16),ih,iw*16/9)',scale=1080:1920[vertical]`,
@@ -300,13 +321,13 @@ export async function cutClip(
 
   if (options.hookTextPath) {
     // drawtext works even if FFmpeg was built without the 'ass' subtitle filter.
-    const font = path.join(FONTS_DIR, "Anton-Regular.ttf");
+    const font = await getGtaFontPath() ?? path.join(FONTS_DIR, "Anton-Regular.ttf");
     filters.push(
       `${videoLabel}drawtext=fontfile='${escapeForFilterGraph(font)}':` +
       `textfile='${escapeForFilterGraph(options.hookTextPath)}':` +
-      "fontsize=84:fontcolor=white:borderw=6:bordercolor=black@0.95:" +
-      "shadowcolor=black@0.75:shadowx=4:shadowy=5:line_spacing=5:" +
-      "x=(w-text_w)/2:y=65:enable='between(t,0,2.7)'[titled]",
+      "fontsize=76:fontcolor=white:borderw=6:bordercolor=black@0.97:" +
+      "shadowcolor=black@0.8:shadowx=3:shadowy=4:line_spacing=5:" +
+      "x=max(100,(940-text_w)/2):y=650:enable='between(t,0,3)'[titled]",
     );
     videoLabel = "[titled]";
   }
@@ -314,7 +335,7 @@ export async function cutClip(
   // A functional caption track for FFmpeg builds that lack the libass/ass filter.
   // Each phrase is shown only for its own interval on the edited timeline.
   if (options.fallbackCaptions?.length) {
-    const font = path.join(FONTS_DIR, "Montserrat-ExtraBold.ttf");
+    const font = await getGtaFontPath() ?? path.join(FONTS_DIR, "Montserrat-ExtraBold.ttf");
     options.fallbackCaptions.forEach((caption, i) => {
       const from = Math.max(0, caption.start).toFixed(2);
       const to = Math.max(0, caption.end).toFixed(2);
@@ -323,9 +344,9 @@ export async function cutClip(
       filters.push(
         `${videoLabel}drawtext=fontfile='${escapeForFilterGraph(font)}':` +
         `textfile='${escapeForFilterGraph(caption.textPath)}':` +
-        `fontsize=65:fontcolor=${color}:borderw=5:bordercolor=black@0.97:` +
+        `fontsize=60:fontcolor=${color}:borderw=5:bordercolor=black@0.97:` +
         `shadowx=3:shadowy=4:shadowcolor=black@0.8:line_spacing=8:` +
-        `x=(w-text_w)/2:y=h-190:enable='between(t,${from},${to})'${outLabel}`,
+        `x=max(110,(920-text_w)/2):y=1110:enable='between(t,${from},${to})'${outLabel}`,
       );
       videoLabel = outLabel;
     });
