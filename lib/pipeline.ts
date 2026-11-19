@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { fetchCaptions } from "./captions";
-import { cutClip, extractAudio, getMediaDuration, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
+import { cutClip, extractAudio, ffmpegTextInstallMessage, getMediaDuration, getVideoDimensions, hasVideoStream, supportsBurnedCaptions, supportsDrawtext } from "./ffmpeg";
 import { findHighlights } from "./highlights";
 import { findAudioEventCandidates } from "./audioEvents";
 import { rankVisualHighlights } from "./visualHighlights";
@@ -48,6 +48,14 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
 
     const burnCaptions = options.burnCaptions;
     const canBurnAss = burnCaptions && await supportsBurnedCaptions();
+  if ((vertical && reframeStyle === "gaming") || (burnCaptions && !canBurnAss)) {
+    if (!(await supportsDrawtext())) throw new Error(ffmpegTextInstallMessage());
+  }
+    // Check before fetching metadata, downloading gigabytes, or invoking paid AI.
+    if ((options.vertical && options.reframeStyle === "gaming") ||
+        (burnCaptions && !canBurnAss)) {
+      if (!(await supportsDrawtext())) throw new Error(ffmpegTextInstallMessage());
+    }
     if (burnCaptions && !canBurnAss) {
       await log("FFmpeg lacks the ASS subtitle filter. Using GTA-style FFmpeg text captions instead.");
     }
