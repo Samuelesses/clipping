@@ -230,3 +230,38 @@ export async function writeGtaHookText(title: string, outPath: string): Promise<
   }
   await fs.writeFile(outPath, [first, second].filter(Boolean).join("\n"), "utf8");
 }
+
+export interface FallbackCaption {
+  start: number;
+  end: number;
+  textPath: string;
+}
+
+/**
+ * Speech cards rendered by FFmpeg drawtext if libass is unavailable. This is
+ * intentionally phrase-at-a-time rather than losing captions entirely.
+ */
+export async function writeFallbackCaptionCards(
+  segments: TranscriptSegment[],
+  clipDuration: number,
+  outDir: string,
+): Promise<FallbackCaption[]> {
+  await fs.mkdir(outDir, { recursive: true });
+  const raw = buildPlainCaptionCues(segments, 0, clipDuration);
+  const cards: FallbackCaption[] = [];
+  for (const cue of raw) {
+    if (cue.end - cue.start < 0.16) continue;
+    const words = cue.text.split(/\s+/).filter(Boolean);
+    // Avoid subtitles that overrun the width of the 1080px GTA composition.
+    let first = "";
+    let second = "";
+    for (const word of words) {
+      if (!second && (first + " " + word).trim().length <= 16) first = (first + " " + word).trim();
+      else second = (second + " " + word).trim();
+    }
+    const path = outDir + "/caption-" + cards.length + ".txt";
+    await fs.writeFile(path, [first, second].filter(Boolean).join("\n"), "utf8");
+    cards.push({ start: cue.start, end: cue.end, textPath: path });
+  }
+  return cards;
+}
