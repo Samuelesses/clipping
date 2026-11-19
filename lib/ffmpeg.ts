@@ -318,9 +318,9 @@ export async function cutClip(
     filters.push(
       `${videoLabel}drawtext=fontfile='${escapeForFilterGraph(font)}':` +
       `textfile='${escapeForFilterGraph(options.hookTextPath)}':` +
-      "fontsize=76:fontcolor=white:borderw=6:bordercolor=black@0.97:" +
-      "shadowcolor=black@0.8:shadowx=3:shadowy=4:line_spacing=5:" +
-      "x=(w-text_w)/2:y=570:enable='between(t,0,3)'[titled]",
+      "fontsize=66:fontcolor=white:borderw=6:bordercolor=black@0.98:" +
+      "shadowcolor=black@0.8:shadowx=3:shadowy=4:line_spacing=4:" +
+      "x=(w-text_w)/2:y=570[titled]",
     );
     videoLabel = "[titled]";
   }
