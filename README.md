@@ -109,6 +109,20 @@ queue and start automatically as slots free up. That means:
 - [`ffmpeg`](https://ffmpeg.org/download.html) (includes `ffprobe`) on your PATH
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
+## Gaming split layout
+
+New vertical clips default to **Gaming split** for horizontal streams with a
+left-side webcam. It enlarges the streamer camera at the top of the 9:16 frame,
+places the gameplay below it and leaves a dedicated space for captions.
+The webcam crop is a fixed preset suitable for the GTA-style stream that
+prompted this feature: it is **not automatic face tracking**. Use **Blur padding**
+or **Crop to fill** for other stream layouts.
+
+Existing clips are not changed automatically. Open the clip's **Regenerate**
+panel, select **Gaming split**, then regenerate to apply it without reselecting
+the highlight. Burned captions still require an FFmpeg build with the `ass`
+filter (libass), and speech captions need usable timestamps.
+
 ## Review just part of a long stream
 
 When creating a project, choose **Start time** and **End time** using
