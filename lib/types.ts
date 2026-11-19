@@ -44,6 +44,9 @@ export interface ProcessOptions {
   burnCaptions: boolean;
   animatedCaptions: boolean;
   reviewBeforeCutting: boolean;
+  /** Original VOD timestamps, in seconds. Omit end to review to the end. */
+  reviewStartSeconds?: number;
+  reviewEndSeconds?: number | null;
 }
 
 export type ProjectStatus = "queued" | "running" | "awaiting_transcription" | "reviewing" | "done" | "error";
