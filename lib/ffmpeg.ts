@@ -4,6 +4,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { run } from "./exec";
 import type { ReframeStyle } from "./types";
+import type { KeepRange } from "./pacing";
 
 // Bundled fonts (see fonts/README.md) so burned-in text looks the same on every
 // machine, regardless of what's installed locally - see lib/subtitles.ts for the
@@ -205,6 +206,10 @@ export interface CutClipOptions {
   reframeStyle?: ReframeStyle;
   /** Path to an .ass caption file (see lib/subtitles.ts) to burn in as open captions. */
   subtitlesPath?: string;
+  /** Pre-rendered GTA hook text on disk, independent of ASS subtitle support. */
+  hookTextPath?: string;
+  /** Absolute source-video intervals to retain after removing genuinely quiet gaps. */
+  keepRanges?: KeepRange[];
 }
 
 export async function cutClip(
@@ -218,58 +223,87 @@ export async function cutClip(
   const args = ["-y", "-ss", String(Math.max(0, startSeconds)), "-i", videoPath, "-t", String(duration)];
 
   const filters: string[] = [];
-  let videoLabel: string | null = null;
+  let videoLabel = "[0:v]";
+  let audioLabel = "0:a?";
+
+  const ranges = options.keepRanges?.filter(r => r.end > r.start) ?? [];
+  if (ranges.length > 1) {
+    // Reassemble the exact source intervals before applying the vertical composition.
+    // Audio and video must be trimmed with the same timeline or they'll drift apart.
+    const sources = ranges.map((_, i) => `[vsrc${i}]`).join("");
+    filters.push(`[0:v]split=${ranges.length}${sources}`);
+    ranges.forEach((range, i) => {
+      const from = Math.max(0, range.start - startSeconds).toFixed(3);
+      const to = Math.min(duration, range.end - startSeconds).toFixed(3);
+      filters.push(`[vsrc${i}]trim=start=${from}:end=${to},setpts=PTS-STARTPTS[vseg${i}]`);
+    });
+    filters.push(`${ranges.map((_,i)=>`[vseg${i}]`).join("")}concat=n=${ranges.length}:v=1:a=0[stitchedVideo]`);
+    videoLabel = "[stitchedVideo]";
+
+    if (await hasAudioStream(videoPath)) {
+      filters.push(`[0:a:0]asplit=${ranges.length}${ranges.map((_,i)=>`[asrc${i}]`).join("")}`);
+      ranges.forEach((range, i) => {
+        const from = Math.max(0, range.start - startSeconds).toFixed(3);
+        const to = Math.min(duration, range.end - startSeconds).toFixed(3);
+        filters.push(`[asrc${i}]atrim=start=${from}:end=${to},asetpts=PTS-STARTPTS[aseg${i}]`);
+      });
+      filters.push(`${ranges.map((_,i)=>`[aseg${i}]`).join("")}concat=n=${ranges.length}:v=0:a=1[stitchedAudio]`);
+      audioLabel = "[stitchedAudio]";
+    }
+  }
 
   if (options.vertical) {
     if (options.reframeStyle === "gaming") {
-      // Gaming layout: separate the small left-side streamer camera from the game.
-      // The webcam rectangle is a preset for typical horizontal game livestreams;
-      // streamers using a different camera position can choose Blur or Crop instead.
-      // Stack an enlarged, readable webcam on top of a 16:9 gameplay view below,
-      // with a subtle dark backdrop rather than giant blurred letterboxes.
+      // Vice-inspired GTA layout; facecam and gameplay are independent crops.
+      // Unlike the old layout the gameplay excludes the left streamer/chat column.
       filters.push(
-        "[0:v]split=3[camSrc][gameSrc][bgSrc]",
-        "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=35,eq=brightness=-0.18[bg]",
-        // The facecam in this stream is in the left 25% of the frame, below chat.
-        // Crop in source coordinates before scaling so FFmpeg can compose it independently.
-        "[camSrc]crop=w=iw*0.235:h=ih*0.45:x=iw*0.025:y=ih*0.19,scale=960:640:force_original_aspect_ratio=increase,crop=960:640[cam]",
-        "[gameSrc]scale=1080:-2[game]",
-        "[bg][cam]overlay=60:100[withCam]",
-        "[withCam][game]overlay=(W-w)/2:870[vertical]",
+        `${videoLabel}split=3[camSrc][gameSrc][bgSrc]`,
+        "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=50,eq=brightness=-0.30:saturation=0.65[bg]",
+        "[camSrc]crop=w=iw*0.205:h=ih*0.38:x=iw*0.025:y=ih*0.19,scale=890:410:force_original_aspect_ratio=increase,crop=890:410[cam]",
+        "[gameSrc]crop=w=iw*0.73:h=ih*0.96:x=iw*0.27:y=ih*0.02,scale=1080:1050:force_original_aspect_ratio=increase,crop=1080:1050[game]",
+        "[bg][cam]overlay=(W-w)/2:285:shortest=1[withCam]",
+        "[withCam][game]overlay=(W-w)/2:725:shortest=1[stacked]",
+        "[stacked]drawbox=x=0:y=0:w=1080:h=13:color=0xF46EA1:t=fill,drawbox=x=95:y=699:w=890:h=8:color=0xF8C976:t=fill,drawbox=x=0:y=1775:w=1080:h=7:color=0x69D8DA:t=fill[vertical]",
       );
     } else if (options.reframeStyle === "crop") {
-      // Center crop is unchanged for users who prefer edge-to-edge gameplay.
       filters.push(
-        "[0:v]crop=w='if(gt(iw/ih,9/16),ih*9/16,iw)':h='if(gt(iw/ih,9/16),ih,iw*16/9)',scale=1080:1920[vertical]",
+        `${videoLabel}crop=w='if(gt(iw/ih,9/16),ih*9/16,iw)':h='if(gt(iw/ih,9/16),ih,iw*16/9)',scale=1080:1920[vertical]`,
       );
     } else {
       filters.push(
-        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=20[bg]",
-        "[0:v]scale=1080:-2[fg]",
+        `${videoLabel}split=2[bgSrc][fgSrc]`,
+        "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=20[bg]",
+        "[fgSrc]scale=1080:-2[fg]",
         "[bg][fg]overlay=(W-w)/2:(H-h)/2[vertical]",
       );
     }
-    videoLabel = "vertical";
+    videoLabel = "[vertical]";
+  }
+
+  if (options.hookTextPath) {
+    // drawtext works even if FFmpeg was built without the 'ass' subtitle filter.
+    const font = path.join(FONTS_DIR, "Anton-Regular.ttf");
+    filters.push(
+      `${videoLabel}drawtext=fontfile='${escapeForFilterGraph(font)}':` +
+      `textfile='${escapeForFilterGraph(options.hookTextPath)}':` +
+      "fontsize=84:fontcolor=white:borderw=6:bordercolor=black@0.95:" +
+      "shadowcolor=black@0.75:shadowx=4:shadowy=5:line_spacing=5:" +
+      "x=(w-text_w)/2:y=65:enable='between(t,0,2.7)'[titled]",
+    );
+    videoLabel = "[titled]";
   }
 
   if (options.subtitlesPath) {
-    // Use the `ass` filter (not `subtitles`) - the caption file already carries its own
-    // PlayResX/PlayResY and style block (see lib/subtitles.ts), so no force_style/sizing
-    // guesswork is needed here and nothing can silently mis-scale on a tall vertical frame.
-    // filename= must be named explicitly (not passed as a bare positional value) - newer
-    // ffmpeg builds (9.x) reject "ass=/path/to/file" with "No option name near ...".
-    const source = videoLabel ? `[${videoLabel}]` : "[0:v]";
     filters.push(
-      `${source}ass=filename='${escapeForFilterGraph(options.subtitlesPath)}':` +
-        `fontsdir='${escapeForFilterGraph(FONTS_DIR)}'[captioned]`,
+      `${videoLabel}ass=filename='${escapeForFilterGraph(options.subtitlesPath)}':` +
+      `fontsdir='${escapeForFilterGraph(FONTS_DIR)}'[captioned]`,
     );
-    videoLabel = "captioned";
+    videoLabel = "[captioned]";
   }
 
   if (filters.length > 0) {
-    args.push("-filter_complex", filters.join(";"), "-map", `[${videoLabel}]`, "-map", "0:a?");
+    args.push("-filter_complex", filters.join(";"), "-map", videoLabel, "-map", audioLabel);
   }
-
   // Write to a local system temp path, not outputPath directly, then move the finished
   // file into place. -movflags +faststart needs to reopen the output file after encoding
   // to shift its moov atom to the front for streaming playback - on a cloud-synced
