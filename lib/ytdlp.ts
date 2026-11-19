@@ -44,15 +44,39 @@ export async function checkDependencies(): Promise<void> {
   );
 }
 
+function parseDuration(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value !== "string") return null;
+  if (/^\\d+(?:\\.\\d+)?$/.test(value)) {
+    const n = Number(value);
+    return n > 0 && Number.isFinite(n) ? n : null;
+  }
+  const parts = value.split(":");
+  if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\\d+$/.test(p))) return null;
+  const nums = parts.map(Number);
+  const total = nums.reduce((acc, part) => acc * 60 + part, 0);
+  return total > 0 && Number.isFinite(total) ? total : null;
+}
+
 export async function getVideoInfo(url: string): Promise<VideoInfo> {
   const stdout = await run("yt-dlp", ["-J", "--no-playlist", ...cookieArgs(), url]);
-  const data = JSON.parse(stdout);
+  const data = JSON.parse(stdout) as Record<string, unknown>;
   const title = typeof data.title === "string" ? data.title : "Untitled video";
-  const duration = typeof data.duration === "number" ? data.duration : 0;
-  if (!duration) {
-    throw new Error("Could not determine the video's duration - is this a live/in-progress stream?");
+  const duration = parseDuration(data.duration) ?? parseDuration(data.duration_string);
+  if (duration !== null) return { title, duration };
+
+  // A live broadcast has no fixed end time. Never accidentally try to download
+  // an endless recording while the user expects a finite VOD.
+  const liveStatus = typeof data.live_status === "string" ? data.live_status : "";
+  if (data.is_live === true || liveStatus === "is_live" || liveStatus === "is_upcoming") {
+    throw new Error("This link points to a live or upcoming broadcast with no fixed duration. Use its archived VOD link once the stream has ended.");
   }
-  return { title, duration };
+  throw new Error(
+    `yt-dlp did not report a duration for "${title}" (live status: ${liveStatus || "unknown"}). ` +
+    "The app needs a known duration to validate the review range. Update yt-dlp with " +
+    "`brew upgrade yt-dlp`, then try the archived VOD's direct URL. If the problem continues, " +
+    "run `yt-dlp -J --no-playlist VIDEO_URL` in Terminal and check duration, duration_string and live_status."
+  );
 }
 
 const DOWNLOAD_PERCENT_RE = /\[download\]\s+(\d+(?:\.\d+)?)%/;
