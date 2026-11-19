@@ -3,6 +3,7 @@ name: Quality check
 on:
   push:
     branches:
+      - main
       - improve-tiktok-clip-selection-2026
   pull_request:
 
