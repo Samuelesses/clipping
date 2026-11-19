@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { hasOpenAIKey } from "@/lib/openaiKey";
 import { enqueueJob } from "@/lib/queue";
 import { createProject } from "@/lib/projects";
 import type { ProcessOptions, ReframeStyle } from "@/lib/types";
@@ -28,6 +29,10 @@ export async function POST(request: Request) {
 
   if (!body || urls.length === 0) {
     return NextResponse.json({ error: "At least one valid video URL is required." }, { status: 400 });
+  }
+
+  if (!(await hasOpenAIKey())) {
+    return NextResponse.json({ error: "Add an OpenAI API key in Settings before creating a project." }, { status: 400 });
   }
 
   const reframeStyle: ReframeStyle = body.reframeStyle === "crop" ? "crop" : "blur";
