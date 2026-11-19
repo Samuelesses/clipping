@@ -11,11 +11,12 @@ export async function transcribeAudio(
   audioPath: string,
   workDir: string,
   onProgress?: (message: string, chunkProgress?: { current: number; total: number }) => void | Promise<void>,
+  baseOffsetSeconds = 0,
 ): Promise<TranscriptSegment[]> {
   const stat = await fsp.stat(audioPath);
 
   if (stat.size <= MAX_UPLOAD_BYTES) {
-    return transcribeFile(audioPath, 0);
+    return transcribeFile(audioPath, baseOffsetSeconds);
   }
 
   const duration = await getMediaDuration(audioPath);
@@ -26,7 +27,7 @@ export async function transcribeAudio(
   const allSegments: TranscriptSegment[] = [];
   for (const [index, chunk] of chunks.entries()) {
     await onProgress?.(`Transcribing chunk ${index + 1}/${chunks.length}...`, { current: index + 1, total: chunks.length });
-    const segments = await transcribeFile(chunk.path, chunk.offsetSeconds);
+    const segments = await transcribeFile(chunk.path, baseOffsetSeconds + chunk.offsetSeconds);
     allSegments.push(...segments);
   }
   return allSegments;
