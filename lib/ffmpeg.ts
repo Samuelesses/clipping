@@ -221,10 +221,24 @@ export async function cutClip(
   let videoLabel: string | null = null;
 
   if (options.vertical) {
-    if (options.reframeStyle === "crop") {
-      // Centered crop to a 9:16 slice, then scale to the target canvas. Works for any
-      // source aspect ratio: crops the sides for wide (e.g. 16:9) sources, or the
-      // top/bottom for anything narrower than 9:16.
+    if (options.reframeStyle === "gaming") {
+      // Gaming layout: separate the small left-side streamer camera from the game.
+      // The webcam rectangle is a preset for typical horizontal game livestreams;
+      // streamers using a different camera position can choose Blur or Crop instead.
+      // Stack an enlarged, readable webcam on top of a 16:9 gameplay view below,
+      // with a subtle dark backdrop rather than giant blurred letterboxes.
+      filters.push(
+        "[0:v]split=3[camSrc][gameSrc][bgSrc]",
+        "[bgSrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=35,eq=brightness=-0.18[bg]",
+        // The facecam in this stream is in the left 25% of the frame, below chat.
+        // Crop in source coordinates before scaling so FFmpeg can compose it independently.
+        "[camSrc]crop=w=iw*0.235:h=ih*0.45:x=iw*0.025:y=ih*0.19,scale=960:640:force_original_aspect_ratio=increase,crop=960:640[cam]",
+        "[gameSrc]scale=1080:-2[game]",
+        "[bg][cam]overlay=60:100[withCam]",
+        "[withCam][game]overlay=(W-w)/2:870[vertical]",
+      );
+    } else if (options.reframeStyle === "crop") {
+      // Center crop is unchanged for users who prefer edge-to-edge gameplay.
       filters.push(
         "[0:v]crop=w='if(gt(iw/ih,9/16),ih*9/16,iw)':h='if(gt(iw/ih,9/16),ih,iw*16/9)',scale=1080:1920[vertical]",
       );
