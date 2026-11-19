@@ -127,6 +127,29 @@ the source video, cached transcript and candidate highlights are reused. The
 app now checks text-filter availability before downloading/paid processing and
 shows an actionable message rather than the raw FFmpeg stack trace.
 
+## GTA webcam detection and TikTok-safe titles
+
+Vicecut automatically samples up to three source-video screenshots and uses an
+image-capable OpenAI model to detect the persistent streamer facecam overlay.
+Coordinates are normalized to the original stream. It requires a confident,
+plausible box; otherwise the layout uses gameplay only rather than guessing.
+Detection is cached per VOD in the local git-ignored data/cache directory.
+Detection adds a small OpenAI vision charge on the first attempt. This is
+static layout detection, not continuous live face tracking.
+
+The 1080x1920 editor keeps text away from TikTok's upper bar, right-side
+action controls, and lower username/description. The facecam is placed near
+the upper area, title around y=650, and captions in the lower-middle around
+y=1070-1240. TikTok UI positions vary by app version and caption length.
+
+### Use the real Pricedown font
+
+Download Pricedown Black from https://www.dafont.com/pricedown.font under
+the author's free desktop license, then open Vicecut Settings > GTA title
+and caption font to upload your .ttf or .otf. The file stays on your Mac in
+data/fonts and is never committed to GitHub. GTA hooks and captions use it
+when supplied; without it they use Anton/Montserrat as fallbacks.
+
 ## Vicecut: GTA-first video editing
 
 The UI now uses a GTA/Vice-inspired sunset colour palette, and new clips default
@@ -160,8 +183,8 @@ to an existing moment. If the saved clip cuts off before the payoff, use the new
 without rerunning AI selection. Extensions are capped at the original review range.
 For precise arbitrary timestamps, edit highlights in **Review before cutting** on
 a new project.
-The webcam crop is a preset, **not automatic tracking**, and may need adjustment
-for a different streamer's layout. The original Blur padding and Crop to fill
+Webcam placement is detected from still screenshots and cached, but is not
+continuous motion tracking. The original Blur padding and Crop to fill
 layouts are still available.
 
 ## Review just part of a long stream
