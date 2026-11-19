@@ -33,12 +33,19 @@ async function moveFileInto(fromPath: string, finalPath: string): Promise<void> 
   await fs.rename(stagingPath, finalPath);
 }
 
-export async function extractAudio(videoPath: string, workDir: string): Promise<string> {
+export async function extractAudio(
+  videoPath: string,
+  workDir: string,
+  startSeconds = 0,
+  durationSeconds?: number,
+): Promise<string> {
   const audioPath = path.join(workDir, "audio.mp3");
   await run("ffmpeg", [
     "-y",
+    ...(startSeconds > 0 ? ["-ss", String(startSeconds)] : []),
     "-i",
     videoPath,
+    ...(durationSeconds !== undefined ? ["-t", String(durationSeconds)] : []),
     "-vn",
     "-ac",
     "1",
