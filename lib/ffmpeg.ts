@@ -80,7 +80,7 @@ export async function getMediaDuration(mediaPath: string): Promise<number> {
 export async function supportsDrawtext(): Promise<boolean> {
   try {
     const stdout = await run("ffmpeg", ["-hide_banner", "-filters"]);
-    return /^\\s*[.A-Z|]{3,}\\s+drawtext\\s+/m.test(stdout);
+    return /^\s*\S+\s+drawtext\s+V->V/m.test(stdout);
   } catch {
     return false;
   }
