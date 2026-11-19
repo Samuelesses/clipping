@@ -156,12 +156,13 @@ The UI now uses a GTA/Vice-inspired sunset colour palette, and new clips default
 to the **Vicecut layout**, composed specifically for horizontal GTA streams
 with the webcam on the **left**:
 
-- A bold, outlined two-line hook appears for the first 2.7 seconds. It is drawn
+- A balanced, outlined one- or two-line GTA hook remains visible for the **entire clip** at the existing position. It is drawn
   using FFmpeg's `drawtext` and the bundled Anton font, so it works even without
   `libass`. This is **GTA-inspired typography**, not an official GTA/Pricedown font.
 - A smaller, enlarged facecam occupies the upper section, with a larger gameplay
   section cropped to exclude the source stream's left-side webcam/chat. No huge
   blank blurred blocks below the game.
+- Speech captions use GTA-themed type, four-word maximum natural phrase grouping, gold word-by-word highlighting, and lower-third positioning. For sources with only segment timing, individual word positions are estimated instead of disabling karaoke captions.
 - Speech captions render using the existing word-timed ASS track when available.
   When FFmpeg has no `ass` filter, the app falls back to **phrase-timed**
   high-contrast `drawtext` caption cards, instead of silently dropping all
