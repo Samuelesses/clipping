@@ -109,6 +109,18 @@ queue and start automatically as slots free up. That means:
 - [`ffmpeg`](https://ffmpeg.org/download.html) (includes `ffprobe`) on your PATH
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
+## Transcription approval
+
+The app checks for existing captions before using Whisper. If usable captions
+are unavailable, the project enters **awaiting_transcription** and shows the
+stream duration plus an approximate USD Whisper cost (based on $0.006/minute).
+No audio extraction/upload for paid transcription occurs until **Approve transcription**
+is selected. **Skip transcription** continues with gameplay/audio event detection,
+without transcript-based speech highlights or captions. Other OpenAI processing
+can still incur charges. Approval/skip decisions are saved locally with the
+project to survive restarts and retries. The cost estimate is illustrative;
+verify current OpenAI pricing separately.
+
 ## API key in the app
 
 You no longer need to edit `.env.local` to get started. Open the **Settings**
