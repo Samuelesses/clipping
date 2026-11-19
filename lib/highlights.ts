@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { createOpenAIClient } from "./openaiKey";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import type { HighlightClip, ProcessOptions, TranscriptSegment, VideoInfo } from "./types";
@@ -38,7 +38,7 @@ export async function findHighlights(
   options: ProcessOptions,
   candidateCount = options.clipCount,
 ): Promise<HighlightClip[]> {
-  const client = new OpenAI();
+  const client = await createOpenAIClient();
   const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
 
   const transcript = segments
