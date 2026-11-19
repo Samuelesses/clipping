@@ -117,6 +117,10 @@ export async function setPendingHighlights(jobId: string, highlights: HighlightC
   });
 }
 
+export async function setTranscriptionDuration(jobId: string, seconds: number): Promise<void> {
+  await updateProject(jobId, (state) => { state.transcriptionDurationSeconds = seconds; });
+}
+
 export async function setProgress(jobId: string, progress: JobProgress | null): Promise<void> {
   await updateProject(jobId, (state) => {
     state.progress = progress;
