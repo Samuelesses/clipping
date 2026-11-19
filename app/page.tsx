@@ -45,6 +45,8 @@ export default function Home() {
   const [reviewDrafts, setReviewDrafts] = useState<HighlightClip[]>([]);
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [transcriptionSubmitting, setTranscriptionSubmitting] = useState(false);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -205,6 +207,27 @@ export default function Home() {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function decideTranscription(jobId: string, decision: "approve" | "skip") {
+    setTranscriptionSubmitting(true);
+    setTranscriptionError(null);
+    try {
+      const response = await fetch(`/api/projects/${jobId}/transcription`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not update transcription decision.");
+      setProject(prev => prev?.jobId === jobId ? { ...prev, status: "queued" } : prev);
+      selectJob(jobId);
+      refreshProjects();
+    } catch (error) {
+      setTranscriptionError(error instanceof Error ? error.message : "Could not save decision.");
+    } finally {
+      setTranscriptionSubmitting(false);
     }
   }
 
@@ -573,7 +596,43 @@ export default function Home() {
             </div>
           )}
 
-          {project.status === "reviewing" && (
+          {project.status === "awaiting_transcription" && (
+             <section className="space-y-4 rounded-xl border border-amber-900 bg-amber-950/20 p-6">
+               <h2 className="text-lg font-medium text-amber-200">Transcription approval required</h2>
+               <p className="text-sm text-neutral-300">
+                 No usable captions were found for this stream. Clipping can transcribe its audio with
+                 OpenAI Whisper, but this is a paid API operation. Nothing has been sent for transcription yet.
+               </p>
+               {typeof project.transcriptionDurationSeconds === "number" && (
+                 <p className="text-sm text-amber-200">
+                   Estimated Whisper transcription cost: approximately $
+                   {(project.transcriptionDurationSeconds / 60 * 0.006).toFixed(2)} USD
+                   ({Math.round(project.transcriptionDurationSeconds / 60).toLocaleString()} audio minutes,
+                   based on $0.006/minute). This is an estimate, not a guaranteed price.
+                 </p>
+               )}
+               <p className="text-sm text-neutral-400">
+                 If you skip, the app can still search for audio peaks and visually review candidate gameplay
+                 moments, but it will miss spoken jokes and cannot generate speech captions from this stream.
+                 Other AI analysis may still incur API charges.
+               </p>
+               <div className="flex flex-wrap gap-3">
+                 <button type="button" disabled={transcriptionSubmitting}
+                   onClick={() => decideTranscription(project.jobId, "approve")}
+                   className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">
+                   Approve transcription
+                 </button>
+                 <button type="button" disabled={transcriptionSubmitting}
+                   onClick={() => decideTranscription(project.jobId, "skip")}
+                   className="rounded-lg border border-neutral-600 px-4 py-2 text-sm font-medium text-neutral-200 disabled:opacity-50">
+                   Skip transcription
+                 </button>
+               </div>
+               {transcriptionError && <p role="alert" className="text-sm text-red-400">{transcriptionError}</p>}
+             </section>
+           )}
+
+           {project.status === "reviewing" && (
             <section className="space-y-4 rounded-xl border border-amber-900 bg-amber-950/20 p-6">
               <div className="space-y-1">
                 <h2 className="text-lg font-medium text-amber-200">Review clip picks</h2>
