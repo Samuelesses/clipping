@@ -34,10 +34,10 @@ A desktop creator tool for turning GTA livestream moments into readable TikTok-r
 The UI uses an asphalt-night foundation and sunset pink/gold with restrained cyan highlights. Runtime tokens are owned by CSS variables in `app/globals.css` (model B); this document mirrors those values. Clip text prioritizes white with a black outline for readability rather than relying on brand accent color for contrast.
 
 ## Typography
-The product brand may use Impact. Clip titles use locally uploaded Pricedown Black when available, or bundled Anton. Dialogue captions use the uploaded font when supplied, or Montserrat ExtraBold. Font files are only uploaded locally and are never checked into the Git repo.
+The product brand may use Impact. Clip titles use locally uploaded Pricedown Black when available, or bundled Anton. Dialogue captions use the uploaded font when supplied, or Montserrat ExtraBold. They use a heavy black outline and gold word-by-word active highlights, interpolating timing when precise words are unavailable. Font files are only uploaded locally and are never checked into the Git repo.
 
 ## Layout
-**Portrait video:** canvas 1080×1920. If a streamer webcam is confidently detected, render facecam at y=0–540 and gameplay at y=540–1920, both edge-to-edge. If no webcam is detected, gameplay fills the canvas. No black letterboxing. Place the 2.7-second opening hook at approximately y=570; dialogue captions are in the gameplay's safe middle, rather than the bottom description or right action rail. These are pragmatic safe zones; TikTok overlays vary by device and version. Gameplay is always the visual priority and should not be masked by a tall permanent title block.
+**Portrait video:** canvas 1080×1920. If a streamer webcam is confidently detected, render facecam at y=0–540 and gameplay at y=540–1920, both edge-to-edge. If no webcam is detected, gameplay fills the canvas. No black letterboxing. Keep the GTA headline visible for the entire clip at y=570, balanced into one or two lines. Word-highlighted dialogue caption cards sit at y=1285 in gameplay, above TikTok's description and clear of the right action rail; chunks are phrase-based and brief. These are pragmatic safe zones; TikTok overlays vary by device and version. Gameplay is always the visual priority and should not be masked by a tall permanent title block.
 
 **Dashboard:** existing sidebar/navigation and responsive app layout remain canonical. Do not apply video-frame geometry to web page elements.
 
