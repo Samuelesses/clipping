@@ -93,7 +93,9 @@ export async function writeClipAss(
     "[Events]\n" +
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
 
-  const titleLine = `Dialogue: 0,${formatAssTime(0)},${formatAssTime(clipEnd - clipStart)},Title,,0,0,0,,${truncateTitle(title)}\n`;
+  // Show the title briefly so it does not obscure the gameplay payoff.
+  const titleSeconds = Math.min(4.5, Math.max(0.5, clipEnd - clipStart));
+  const titleLine = `Dialogue: 0,${formatAssTime(0)},${formatAssTime(titleSeconds)},Title,,0,0,0,,${truncateTitle(title)}\n`;
 
   const wordChunks = animated ? buildWordChunks(segments, clipStart, clipEnd) : null;
   const captionLines = wordChunks
