@@ -1,14 +1,15 @@
 import fs from "fs/promises";
 import path from "path";
 import { fetchCaptions } from "./captions";
-import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
+import { cutClip, extractAudio, getMediaDuration, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
 import { findAudioEventCandidates } from "./audioEvents";
 import { rankVisualHighlights } from "./visualHighlights";
 import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, setTranscriptionDuration, updateClip } from "./projects";
 import { withRetry } from "./retry";
 import { getReviewWindow, restrictTranscript } from "./reviewRange";
-import { writeClipAss } from "./subtitles";
+import { writeClipAss, writeGtaHookText } from "./subtitles";
+import { findPacingRanges, remapTranscript } from "./pacing";
 import { transcribeAudio } from "./transcribe";
 import type { GeneratedClip, HighlightClip, ProcessOptions, ReframeStyle, TranscriptSegment, VideoInfo } from "./types";
 import { cacheDirFor } from "./videoCache";
@@ -111,19 +112,34 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
       await log(`Cutting clip ${index + 1}/${highlights.length}: ${highlight.title}`);
       await setProgress(jobId, { label: "Cutting clips", current: index + 1, total: highlights.length });
 
+      const gtaMode = options.vertical && options.reframeStyle === "gaming";
+      const keepRanges = await findPacingRanges(videoPath, highlight.start, highlight.end);
+      const editedDuration = keepRanges.reduce((seconds, range) => seconds + range.end - range.start, 0);
+      const editedSegments = remapTranscript(segments, keepRanges);
+      if (keepRanges.length > 1) {
+        await log(`Tightened pacing: removed ${Math.round((highlight.end - highlight.start) - editedDuration)}s of genuinely quiet audio without changing the source moment.`);
+      }
+
+      let hookTextPath: string | undefined;
+      if (gtaMode) {
+        hookTextPath = path.join(workDir, `clip-${index + 1}-hook.txt`);
+        await writeGtaHookText(highlight.title, hookTextPath);
+      }
+
       let subtitlesPath: string | undefined;
       if (captionCanvas) {
         subtitlesPath = path.join(workDir, `clip-${index + 1}.ass`);
         await writeClipAss(
-          segments,
-          highlight.start,
-          highlight.end,
+          editedSegments,
+          0,
+          editedDuration,
           captionCanvas.width,
           captionCanvas.height,
           highlight.title,
           subtitlesPath,
           videoBottomY,
           options.animatedCaptions,
+          gtaMode,
         );
       }
 
@@ -132,6 +148,8 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
         vertical: options.vertical,
         reframeStyle: options.reframeStyle,
         subtitlesPath,
+        hookTextPath,
+        keepRanges,
       });
 
       await addClip(jobId, { ...highlight, url: `/clips/${jobId}/${fileName}` });
@@ -234,12 +252,13 @@ export async function regenerateClip(
 
   let segments: TranscriptSegment[] = [];
   if (burnCaptions) {
-    const raw = await fs.readFile(path.join(cacheDir, "transcript.json"), "utf8").catch(() => null);
+    // A range-limited stream has its own transcript cache, not necessarily the full VOD.
+    const window = getReviewWindow(project.options, await getMediaDuration(videoPath));
+    const rangedPath = path.join(cacheDir, `transcript-${window.start}-${window.end}.json`);
+    const raw = await fs.readFile(rangedPath, "utf8").catch(() => null)
+      ?? await fs.readFile(path.join(cacheDir, "transcript.json"), "utf8").catch(() => null);
     if (!raw) {
-      throw new Error(
-        "The transcript for this project is no longer cached, so captions can't be burned in - try again " +
-          "with captions turned off, or use \"Generate more\" to redo the whole project.",
-      );
+      throw new Error("No saved transcript for burned captions. Regenerate with captions off or reprocess the source.");
     }
     segments = JSON.parse(raw) as TranscriptSegment[];
   }
@@ -252,19 +271,29 @@ export async function regenerateClip(
   try {
     const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, vertical, burnCaptions, reframeStyle);
 
+    const gtaMode = vertical && reframeStyle === "gaming";
+    const keepRanges = await findPacingRanges(videoPath, clip.start, clip.end);
+    const editedDuration = keepRanges.reduce((seconds, range) => seconds + range.end - range.start, 0);
+    let hookTextPath: string | undefined;
+    if (gtaMode) {
+      hookTextPath = path.join(scratchDir, "regen-hook.txt");
+      await writeGtaHookText(clip.title, hookTextPath);
+    }
+
     let subtitlesPath: string | undefined;
     if (captionCanvas) {
       subtitlesPath = path.join(scratchDir, "regen.ass");
       await writeClipAss(
-        segments,
-        clip.start,
-        clip.end,
+        remapTranscript(segments, keepRanges),
+        0,
+        editedDuration,
         captionCanvas.width,
         captionCanvas.height,
         clip.title,
         subtitlesPath,
         videoBottomY,
         animatedCaptions,
+        gtaMode,
       );
     }
 
@@ -276,7 +305,7 @@ export async function regenerateClip(
     // cutClip itself writes to a local temp path and moves the finished file into place
     // (see lib/ffmpeg.ts), so this overwrites finalOutPath atomically with no partial
     // reads and no separate tmp/rename dance needed here.
-    await cutClip(videoPath, finalOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath });
+    await cutClip(videoPath, finalOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath, hookTextPath, keepRanges });
 
     // Cache-bust: the URL path is unchanged (same file), but browsers cache video
     // responses aggressively - a changing query string forces a reload of the new cut.
