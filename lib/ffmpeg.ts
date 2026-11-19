@@ -353,9 +353,11 @@ export async function cutClip(
   }
 
   if (options.subtitlesPath) {
+    const userFont = await getGtaFontPath();
+    const assFontDir = userFont ? path.dirname(userFont) : FONTS_DIR;
     filters.push(
       `${videoLabel}ass=filename='${escapeForFilterGraph(options.subtitlesPath)}':` +
-      `fontsdir='${escapeForFilterGraph(FONTS_DIR)}'[captioned]`,
+      `fontsdir='${escapeForFilterGraph(assFontDir)}'[captioned]`,
     );
     videoLabel = "[captioned]";
   }
