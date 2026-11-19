@@ -77,6 +77,7 @@ export interface ProjectState {
   progress: JobProgress | null;
   /** Set when status is "reviewing" - the AI's proposed clips, editable before cutting. */
   pendingHighlights: HighlightClip[] | null;
+  transcriptionDurationSeconds?: number;
   clips: GeneratedClip[];
   errorMessage: string | null;
   createdAt: string;
