@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import { getGtaFontPath } from "./gtaFont";
 import type { TranscriptSegment } from "./types";
 
 const MAX_TITLE_LENGTH = 70;
@@ -47,10 +48,13 @@ export async function writeClipAss(
   animated = false,
   gtaMode = false,
 ): Promise<void> {
-  const captionFontSize = Math.round(canvasHeight * (gtaMode ? 0.041 : 0.038));
+  const gtaFont = gtaMode ? await getGtaFontPath() : null;
+  const captionFontName = gtaFont ? "Pricedown" : "Montserrat ExtraBold";
+  const captionFontSize = Math.round(canvasHeight * (gtaMode ? 0.036 : 0.038));
   const titleFontSize = Math.round(canvasHeight * 0.062);
   const titleMarginV = Math.round(canvasHeight * 0.09);
-  const sideMargin = Math.round(canvasWidth * 0.06);
+  const sideMargin = gtaMode ? 145 : Math.round(canvasWidth * 0.06);
+  const rightMargin = gtaMode ? 265 : sideMargin;
 
   // When we know where the actual video content ends (vertical mode, where the sharp
   // foreground video sits centered over a blurred fill), anchor captions just under it
@@ -61,8 +65,8 @@ export async function writeClipAss(
   // room for the text instead of pushing it off-screen.
   const captionGap = Math.round(canvasHeight * 0.02);
   const maxCaptionMarginV = canvasHeight - Math.round(captionFontSize * 2.6);
-  const captionAlignment = gtaMode ? 2 : (videoBottomY !== null ? 8 : 2);
-  const captionMarginV = gtaMode ? 72 :
+  const captionAlignment = gtaMode ? 8 : (videoBottomY !== null ? 8 : 2);
+  const captionMarginV = gtaMode ? 1070 :
     videoBottomY !== null ? Math.min(videoBottomY + captionGap, maxCaptionMarginV) : Math.round(canvasHeight * 0.1);
 
   // Bright gold title (classic high-contrast "clip title" look), clean white captions -
@@ -87,8 +91,8 @@ export async function writeClipAss(
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, " +
     "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, " +
     "Alignment, MarginL, MarginR, MarginV, Encoding\n" +
-    `Style: Caption,Montserrat ExtraBold,${captionFontSize},${captionColour},&H000000FF,&H00000000,` +
-    `&H00000000,0,0,0,0,100,100,0,0,1,3.5,1.5,${captionAlignment},${sideMargin},${sideMargin},${captionMarginV},1\n` +
+    `Style: Caption,${captionFontName},${captionFontSize},${captionColour},&H000000FF,&H00000000,` +
+    `&H00000000,0,0,0,0,100,100,0,0,1,3.5,1.5,${captionAlignment},${sideMargin},${rightMargin},${captionMarginV},1\n` +
     `Style: Title,Anton,${titleFontSize},${titleColour},&H000000FF,&H00000000,&H00000000,0,0,0,0,` +
     `100,100,0,0,1,4.5,2,8,${sideMargin},${sideMargin},${titleMarginV},1\n\n` +
     "[Events]\n" +
@@ -202,7 +206,8 @@ function truncateTitle(title: string): string {
 function sanitizeAssText(text: string): string {
   // Curly braces and backslashes are ASS override-tag syntax - strip them so
   // transcript text can never be (mis)interpreted as formatting commands.
-  return text.replace(/[{}]/g, "").replace(/\\/g, "/");
+  return text.replace(/[{}]/g, "").replace(/\\/g, "/")
+    .replace(/^(?:\s*>>\s*)+/, "").replace(/\s+/g, " ").trim();
 }
 
 function formatAssTime(totalSeconds: number): string {
