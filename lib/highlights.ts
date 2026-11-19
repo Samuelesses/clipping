@@ -57,6 +57,11 @@ export async function findHighlights(
       {
         role: "system",
         content:
+          "You are a specialist editor for GTA livestream highlights, heists, car chases, chaotic NPC interactions, streamer freakouts and funny missions. " +
+          "Your clips should play like a miniature story with a clear hook, context, the ACTUAL interesting action, and the outcome or reaction. " +
+          "A heist being announced or a robbery BEGINNING is never, by itself, the payoff; show what goes wrong or succeeds and the reaction afterward. " +
+          "If the transcript ends before the outcome, reject that candidate rather than producing a misleading cliffhanger. " +
+          "Keep the title punchy, 2-7 words, and GTA-flavoured without inventing what happened. " +
           "You are an expert short-form video editor. You read transcripts of long-form videos and streams " +
           "and find the moments most likely to work as standalone short clips (e.g. YouTube Shorts, TikTok, " +
           "Twitter clips) - the kind that get shared and go viral. Look for a mix of: \n" +
@@ -122,13 +127,16 @@ export async function findHighlights(
   const clips = parsed.clips
     .filter((clip) => clip.end > clip.start)
     .map((clip) => {
-      const start = Math.max(reviewWindow.start, clip.start);
-      const end = Math.min(reviewWindow.end, clip.end);
-      return {
-        ...clip,
-        start: Math.max(0, snapStart(start, segments)),
-        end: Math.min(info.duration, snapEnd(end, segments)),
-      };
+      // A little setup and, importantly, some aftermath. Avoid the common
+      // failure mode where a heist is announced and the clip ends as it begins.
+      let start = Math.max(reviewWindow.start, snapStart(clip.start - 2, segments));
+      let end = Math.min(reviewWindow.end, snapEnd(clip.end + 7, segments));
+      // Keep the payoff/end rather than blindly truncating the end of a scene.
+      // If the requested maximum forces a choice, drop older setup first.
+      if (end - start > options.maxClipSeconds) {
+        start = Math.max(reviewWindow.start, end - options.maxClipSeconds);
+      }
+      return { ...clip, start, end };
     })
     // Avoid padding short moments with unrelated dialogue just to fill a quota. 
     // A genuinely short payoff is usually better dropped than stretched into dead air. 
