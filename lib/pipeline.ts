@@ -48,9 +48,6 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
 
     const burnCaptions = options.burnCaptions;
     const canBurnAss = burnCaptions && await supportsBurnedCaptions();
-  if ((vertical && reframeStyle === "gaming") || (burnCaptions && !canBurnAss)) {
-    if (!(await supportsDrawtext())) throw new Error(ffmpegTextInstallMessage());
-  }
     // Check before fetching metadata, downloading gigabytes, or invoking paid AI.
     if ((options.vertical && options.reframeStyle === "gaming") ||
         (burnCaptions && !canBurnAss)) {
