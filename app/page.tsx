@@ -42,7 +42,7 @@ export default function Home() {
   const [minClipSeconds, setMinClipSeconds] = useState(12);
   const [maxClipSeconds, setMaxClipSeconds] = useState(55);
   const [vertical, setVertical] = useState(true);
-  const [reframeStyle, setReframeStyle] = useState<ReframeStyle>("blur");
+  const [reframeStyle, setReframeStyle] = useState<ReframeStyle>("gaming");
   const [burnCaptions, setBurnCaptions] = useState(true);
   const [animatedCaptions, setAnimatedCaptions] = useState(true);
   const [reviewBeforeCutting, setReviewBeforeCutting] = useState(false);
@@ -498,6 +498,11 @@ export default function Home() {
               <div className="space-y-1.5">
                 <span className="text-sm font-medium text-neutral-300">Vertical reframe style</span>
                 <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
+                  <RadioField
+                    label="Gaming split (enlarged left-side facecam and gameplay)"
+                    checked={reframeStyle === "gaming"}
+                    onChange={() => setReframeStyle("gaming")}
+                  />
                   <RadioField
                     label="Blur padding (keeps full frame, blurred fill top/bottom)"
                     checked={reframeStyle === "blur"}
@@ -1000,6 +1005,7 @@ function RegeneratePanel({
       </div>
       {vertical && (
         <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
+          <RadioField label="Gaming split (left-side facecam)" checked={reframeStyle === "gaming"} onChange={() => setReframeStyle("gaming")} />
           <RadioField label="Blur padding" checked={reframeStyle === "blur"} onChange={() => setReframeStyle("blur")} />
           <RadioField label="Crop to fill" checked={reframeStyle === "crop"} onChange={() => setReframeStyle("crop")} />
         </div>
