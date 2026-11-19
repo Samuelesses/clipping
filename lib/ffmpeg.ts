@@ -76,6 +76,23 @@ export async function getMediaDuration(mediaPath: string): Promise<number> {
   return duration;
 }
 
+/** Whether this FFmpeg build can draw GTA titles and fallback captions. */
+export async function supportsDrawtext(): Promise<boolean> {
+  try {
+    const stdout = await run("ffmpeg", ["-hide_banner", "-filters"]);
+    return /^\\s*[.A-Z|]{3,}\\s+drawtext\\s+/m.test(stdout);
+  } catch {
+    return false;
+  }
+}
+
+export function ffmpegTextInstallMessage(): string {
+  return "Your FFmpeg build lacks the drawtext filter needed for GTA-style titles/captions. " +
+    "On macOS run `brew install ffmpeg-full`, then restart Clipping. " +
+    "Verify with `$(brew --prefix ffmpeg-full)/bin/ffmpeg -hide_banner -filters | grep drawtext`. " +
+    "Clipping will automatically use ffmpeg-full when installed.";
+}
+
 /** Whether this ffmpeg build has libass support (required for the `ass` filter used to burn in captions). */
 export async function supportsBurnedCaptions(): Promise<boolean> {
   try {
