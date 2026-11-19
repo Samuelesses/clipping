@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeneratedClip, HighlightClip, ProjectState, ReframeStyle } from "@/lib/types";
 
 type ViewMode = "grid" | "list";
-type WorkspaceTab = "dashboard" | "create" | "projects" | "clips";
+type WorkspaceTab = "dashboard" | "create" | "projects" | "clips" | "settings";
 
 interface RegenerateDefaults {
   vertical: boolean;
@@ -30,6 +30,11 @@ export default function Home() {
   const [animatedCaptions, setAnimatedCaptions] = useState(true);
   const [reviewBeforeCutting, setReviewBeforeCutting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [apiKeyConfigured, setApiKeyConfigured] = useState<boolean | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [apiKeyBusy, setApiKeyBusy] = useState(false);
+  const [apiKeyFeedback, setApiKeyFeedback] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -47,6 +52,7 @@ export default function Home() {
 
   useEffect(() => {
     refreshProjects();
+    refreshApiKeyStatus();
     const stored = window.localStorage.getItem(ACTIVE_JOB_KEY);
     if (stored) setActiveJobId(stored);
   }, []);
@@ -89,6 +95,57 @@ export default function Home() {
       setReviewJobId(null);
     }
   }, [project, reviewJobId]);
+
+  async function refreshApiKeyStatus() {
+    try {
+      const response = await fetch("/api/settings/openai", { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load API key settings.");
+      const status: { configured: boolean } = await response.json();
+      setApiKeyConfigured(status.configured);
+    } catch {
+      setApiKeyConfigured(null);
+    }
+  }
+
+  async function saveApiKey(e: React.FormEvent) {
+    e.preventDefault();
+    if (apiKeyBusy || !apiKeyInput.trim()) return;
+    setApiKeyBusy(true);
+    setApiKeyFeedback(null);
+    try {
+      const response = await fetch("/api/settings/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: apiKeyInput.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not save the key.");
+      setApiKeyInput("");
+      setApiKeyConfigured(true);
+      setApiKeyFeedback("API key saved on this Mac.");
+    } catch (error) {
+      setApiKeyFeedback(error instanceof Error ? error.message : "Could not save the key.");
+    } finally {
+      setApiKeyBusy(false);
+    }
+  }
+
+  async function removeApiKey() {
+    setApiKeyBusy(true);
+    setApiKeyFeedback(null);
+    try {
+      const response = await fetch("/api/settings/openai", { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not remove the key.");
+      setApiKeyConfigured(data.configured);
+      setApiKeyInput("");
+      setApiKeyFeedback(data.configured ? "Saved key removed. An environment key is still configured." : "Saved API key removed.");
+    } catch (error) {
+      setApiKeyFeedback(error instanceof Error ? error.message : "Could not remove the key.");
+    } finally {
+      setApiKeyBusy(false);
+    }
+  }
 
   async function refreshProjects() {
     try {
@@ -252,7 +309,7 @@ export default function Home() {
       <aside className="app-sidebar">
         <div className="app-brand"><span className="app-brand-icon">▶</span><span>Clipping <b>Studio</b></span><small>v2.0</small></div>
         <nav className="app-nav" aria-label="Workspace">
-          {([["dashboard", "◫", "Dashboard"], ["create", "+", "Create Project"], ["projects", "▤", "Projects"], ["clips", "▣", "Clip Library"]] as const).map(([tab, symbol, label]) => (
+          {([["dashboard", "◫", "Dashboard"], ["create", "+", "Create Project"], ["projects", "▤", "Projects"], ["clips", "▣", "Clip Library"], ["settings", "⚙", "Settings"]] as const).map(([tab, symbol, label]) => (
             <button type="button" key={tab} onClick={() => setWorkspaceTab(tab)} className={workspaceTab === tab ? "active" : ""}><span aria-hidden="true">{symbol}</span>{label}</button>
           ))}
         </nav>
@@ -261,6 +318,12 @@ export default function Home() {
       <div className="app-main">
         <div className="app-topbar"><span>CREATOR WORKSPACE <span className="topbar-divider">/</span> {workspaceTab.toUpperCase()}</span><span className="topbar-status"><span className="studio-live-dot" /> {runningCount} active jobs</span></div>
         <div className="app-content">
+      {workspaceTab === "dashboard" && apiKeyConfigured === false && (
+        <div className="studio-panel rounded-xl border border-amber-700/50 bg-amber-950/20 p-4 text-sm text-amber-200">
+          An OpenAI API key is needed to generate clips.{" "}
+          <button type="button" onClick={() => setWorkspaceTab("settings")} className="font-semibold underline underline-offset-2">Add API key in Settings</button>
+        </div>
+      )}
       {workspaceTab === "dashboard" && <header className="studio-hero space-y-4">
         <div className="studio-eyebrow"><span className="studio-live-dot" /> CREATOR WORKSPACE <span className="studio-version">/ STUDIO 2.0</span></div><h1 className="studio-title">Turn long videos into <span>standout moments.</span></h1>
         <p className="text-neutral-400">
@@ -271,6 +334,48 @@ export default function Home() {
       </header>}
 
       {workspaceTab === "dashboard" && <section className="studio-stats" aria-label="Workspace overview"><div className="studio-stat"><span>PROJECTS</span><strong>{projects.length}</strong><small>{completedCount} completed</small></div><div className="studio-stat"><span>CLIPS CREATED</span><strong>{totalClips}</strong><small>Across your library</small></div><div className="studio-stat"><span>IN PROGRESS</span><strong>{runningCount}</strong><small>Background processing</small></div></section>}
+      {workspaceTab === "settings" && (
+        <section className="space-y-5">
+          <div className="studio-section-heading">
+            <div><span className="studio-section-kicker">SETTINGS / AI</span><h2>OpenAI API key</h2></div>
+            <span className="studio-section-hint">{apiKeyConfigured === true ? "Configured" : apiKeyConfigured === false ? "Not configured" : "Checking..."}</span>
+          </div>
+          <div className="studio-panel space-y-5 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
+            <p className="text-sm text-neutral-400">
+              Enter your OpenAI API key here instead of editing .env.local. Your key is stored only on this
+              computer in the git-ignored data/settings directory. It is not displayed again or returned
+              to the browser. OpenAI API usage is billed separately.
+            </p>
+            <form onSubmit={saveApiKey} className="space-y-3">
+              <label htmlFor="openai-api-key" className="block text-sm font-medium text-neutral-200">API key</label>
+              <div className="flex flex-wrap gap-2">
+                <input id="openai-api-key" type={showApiKey ? "text" : "password"}
+                  autoComplete="off" spellCheck={false} value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder={apiKeyConfigured ? "Paste a new key to replace the current one" : "sk-..."}
+                  className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm outline-none focus:border-neutral-500" />
+                <button type="button" onClick={() => setShowApiKey(v => !v)}
+                  className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-300">
+                  {showApiKey ? "Hide" : "Show"}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="submit" disabled={apiKeyBusy || !apiKeyInput.trim()}
+                  className="rounded-lg bg-white px-5 py-2 text-sm font-semibold text-black disabled:opacity-50">
+                  {apiKeyBusy ? "Saving..." : "Save API key"}
+                </button>
+                <button type="button" disabled={apiKeyBusy} onClick={removeApiKey}
+                  className="text-sm text-neutral-400 underline underline-offset-2 disabled:opacity-50">
+                  Remove saved key
+                </button>
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer"
+                  className="text-sm text-neutral-300 underline underline-offset-2">Get an API key</a>
+              </div>
+              {apiKeyFeedback && <p role="status" className="text-sm text-neutral-300">{apiKeyFeedback}</p>}
+            </form>
+          </div>
+        </section>
+      )}
       {(workspaceTab === "dashboard" || workspaceTab === "create") && <div className="studio-section-heading"><div><span className="studio-section-kicker">01 / CREATE</span><h2>New clipping project</h2></div><span className="studio-section-hint">Start with a link. Fine-tune later.</span></div>}
       {(workspaceTab === "dashboard" || workspaceTab === "create") && <form ref={formRef} onSubmit={handleSubmit} className="studio-panel studio-create space-y-5 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
         <div className="flex flex-col gap-2">
