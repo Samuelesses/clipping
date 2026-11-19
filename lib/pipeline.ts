@@ -254,9 +254,19 @@ export async function regenerateClip(
   if (burnCaptions) {
     // A range-limited stream has its own transcript cache, not necessarily the full VOD.
     const window = getReviewWindow(project.options, await getMediaDuration(videoPath));
-    const rangedPath = path.join(cacheDir, `transcript-${window.start}-${window.end}.json`);
-    const raw = await fs.readFile(rangedPath, "utf8").catch(() => null)
-      ?? await fs.readFile(path.join(cacheDir, "transcript.json"), "utf8").catch(() => null);
+    const prefix = `transcript-${window.start}-`;
+    const exact = `transcript-${window.start}-${window.end}.json`;
+    // yt-dlp's duration may differ slightly from the actual ffprobe duration.
+    // Accept a matching range checkpoint within two seconds rather than failing.
+    const ranged = (await fs.readdir(cacheDir).catch(() => [] as string[]))
+      .filter(name => name.startsWith(prefix) && name.endsWith(".json"))
+      .filter(name => Math.abs(Number(name.slice(prefix.length, -5)) - window.end) <= 2);
+    const paths = [exact, ...ranged, "transcript.json"];
+    let raw: string | null = null;
+    for (const name of paths) {
+      raw = await fs.readFile(path.join(cacheDir, name), "utf8").catch(() => null);
+      if (raw !== null) break;
+    }
     if (!raw) {
       throw new Error("No saved transcript for burned captions. Regenerate with captions off or reprocess the source.");
     }
