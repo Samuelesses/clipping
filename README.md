@@ -109,13 +109,23 @@ queue and start automatically as slots free up. That means:
 - [`ffmpeg`](https://ffmpeg.org/download.html) (includes `ffprobe`) on your PATH
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
+## API key in the app
+
+You no longer need to edit `.env.local` to get started. Open the **Settings**
+tab in Clipping Studio, paste your OpenAI API key, and select **Save API key**.
+The key is stored locally in `data/settings/openai-key` with restrictive
+file permissions and is excluded from Git by `.gitignore`. The browser only
+receives a configured/not-configured status; it cannot read the saved key.
+You can replace or remove the saved key in Settings. The existing
+`OPENAI_API_KEY` environment variable also still works as a fallback.
+Keep the application accessible only to trusted local users.
+
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env.local
-# then edit .env.local and add your OPENAI_API_KEY
 npm run dev
+# Open Settings in the app and save your OpenAI API key
 ```
 
 Open [http://localhost:3000](http://localhost:3000), paste a video URL, and click
