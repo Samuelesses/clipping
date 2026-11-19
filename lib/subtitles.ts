@@ -220,7 +220,7 @@ export async function writeGtaHookText(title: string, outPath: string): Promise<
   const cleaned = title.toUpperCase()
     .normalize("NFKD")
     .replace(/[^A-Z0-9?!'& -]/g, "")
-    .replace(/\\s+/g, " ").trim().slice(0, 48) || "GTA MOMENT";
+    .replace(/\s+/g, " ").trim().slice(0, 48) || "GTA MOMENT";
   const words = cleaned.split(" ");
   let first = "";
   let second = "";
@@ -228,5 +228,5 @@ export async function writeGtaHookText(title: string, outPath: string): Promise<
     if (!second && (first + " " + word).trim().length <= 19) first = (first + " " + word).trim();
     else second = (second + " " + word).trim();
   }
-  await fs.writeFile(outPath, [first, second].filter(Boolean).join("\\n"), "utf8");
+  await fs.writeFile(outPath, [first, second].filter(Boolean).join("\n"), "utf8");
 }
