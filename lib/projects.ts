@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import { randomUUID } from "crypto";
 import path from "path";
 import type { GeneratedClip, HighlightClip, JobProgress, ProcessOptions, ProjectState, ProjectStatus } from "./types";
 
@@ -13,9 +14,15 @@ function projectPath(jobId: string): string {
 /** Atomic write (write to a temp file, then rename) so a crash mid-write can't corrupt state. */
 async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.${process.pid}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf8");
-  await fs.rename(tmpPath, filePath);
+  // Every write needs its own temporary name. Process IDs alone collide when
+  // overlapping requests or multiple Next.js workers save the same project.
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), { encoding: "utf8", flag: "wx" });
+    await fs.rename(tmpPath, filePath);
+  } finally {
+    await fs.rm(tmpPath, { force: true }).catch(() => {});
+  }
 }
 
 export async function createProject(
