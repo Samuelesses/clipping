@@ -8,7 +8,7 @@ two screenshots each. Audio spikes are only possible events (not verified
 gameplay wins/crashes), so audio-only moments are **not** selected if the visual
 review fails. Review and trim remain available before exporting.
 
-- Default clips are now 12–55 seconds; generated titles only display at the
+- Default clips are now 12–75 seconds; generated titles only display at the
   beginning, and animated captions are enabled by default.
 - `VISUAL_REVIEW_ENABLED=false` disables screenshots and visual API calls.
 - `AUDIO_EVENT_DETECTION=false` skips the full-stream audio scan.
@@ -109,19 +109,39 @@ queue and start automatically as slots free up. That means:
 - [`ffmpeg`](https://ffmpeg.org/download.html) (includes `ffprobe`) on your PATH
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
-## Gaming split layout
+## Vicecut: GTA-first video editing
 
-New vertical clips default to **Gaming split** for horizontal streams with a
-left-side webcam. It enlarges the streamer camera at the top of the 9:16 frame,
-places the gameplay below it and leaves a dedicated space for captions.
-The webcam crop is a fixed preset suitable for the GTA-style stream that
-prompted this feature: it is **not automatic face tracking**. Use **Blur padding**
-or **Crop to fill** for other stream layouts.
+The UI now uses a GTA/Vice-inspired sunset colour palette, and new clips default
+to the **Vicecut layout**, composed specifically for horizontal GTA streams
+with the webcam on the **left**:
 
-Existing clips are not changed automatically. Open the clip's **Regenerate**
-panel, select **Gaming split**, then regenerate to apply it without reselecting
-the highlight. Burned captions still require an FFmpeg build with the `ass`
-filter (libass), and speech captions need usable timestamps.
+- A bold, outlined two-line hook appears for the first 2.7 seconds. It is drawn
+  using FFmpeg's `drawtext` and the bundled Anton font, so it works even without
+  `libass`. This is **GTA-inspired typography**, not an official GTA/Pricedown font.
+- A smaller, enlarged facecam occupies the upper section, with a larger gameplay
+  section cropped to exclude the source stream's left-side webcam/chat. No huge
+  blank blurred blocks below the game.
+- Speech captions render using the existing word-timed ASS track when available.
+  When FFmpeg has no `ass` filter, the app falls back to **phrase-timed**
+  high-contrast `drawtext` caption cards, instead of silently dropping all
+  captions. This fallback requires FFmpeg's `drawtext` filter.
+- A conservative quiet-audio pass can remove internal silences longer than ~3
+  seconds. It preserves game audio, action and the beginning/ending of the clip;
+  silence detection failure leaves the original timeline intact.
+- GTA-specific highlight instructions reject a robbery/chase that only *starts*
+  inside the clip. Selection allows 2 seconds of setup and 7 seconds of
+  aftermath, prioritising the ending if it hits the length cap. These heuristics
+  improve the odds but cannot prove the real payoff is complete.
+- The default maximum clip length is 75 seconds. You can still change it in
+  advanced options.
+
+Old clips are **not** modified automatically. In the clip library, use
+**Regenerate clip → Vicecut layout** to apply the new composition, hook and pacing
+to an existing moment. Regeneration doesn't choose a new start/end; to change the
+story boundary, edit highlights in **Review before cutting** on a new project.
+The webcam crop is a preset, **not automatic tracking**, and may need adjustment
+for a different streamer's layout. The original Blur padding and Crop to fill
+layouts are still available.
 
 ## Review just part of a long stream
 
