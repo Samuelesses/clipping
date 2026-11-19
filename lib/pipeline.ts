@@ -7,6 +7,7 @@ import { findAudioEventCandidates } from "./audioEvents";
 import { rankVisualHighlights } from "./visualHighlights";
 import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, setTranscriptionDuration, updateClip } from "./projects";
 import { withRetry } from "./retry";
+import { getReviewWindow, restrictTranscript } from "./reviewRange";
 import { writeClipAss } from "./subtitles";
 import { transcribeAudio } from "./transcribe";
 import type { GeneratedClip, HighlightClip, ProcessOptions, ReframeStyle, TranscriptSegment, VideoInfo } from "./types";
@@ -61,8 +62,10 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     });
     await setTitle(jobId, info.title);
 
+    const reviewWindow = getReviewWindow(options, info.duration);
+    await log(`Reviewing only ${reviewWindow.start.toFixed(0)}s–${reviewWindow.end.toFixed(0)}s of the ${Math.round(info.duration)}s stream.`);
     const videoPath = await ensureVideoDownloaded(jobId, url, info, log);
-    const segments = await ensureTranscript(jobId, workDir, url, videoPath, info.duration, log);
+    const segments = await ensureTranscript(jobId, workDir, url, videoPath, info.duration, options, log);
     if (segments === null) return; // Paused until the user decides whether to pay for transcription.
 
     await log(`Transcript ready (${segments.length} segments). Asking the model to find the best parts...`);
@@ -335,12 +338,24 @@ export async function ensureTranscript(
   url: string,
   videoPath: string,
   videoDuration: number,
+  options: ProcessOptions,
   log: (message: string) => Promise<void>,
 ): Promise<TranscriptSegment[] | null> {
   // Same idea as the video itself: cached by URL so a transcript, once fetched or
   // transcribed, is never redone for the same video again.
   const cacheDir = cacheDirFor(url);
-  const transcriptPath = path.join(cacheDir, "transcript.json");
+  const window = getReviewWindow(options, videoDuration);
+  const partial = window.start > 0 || window.end < videoDuration;
+  const transcriptPath = partial
+    ? path.join(cacheDir, `transcript-${window.start}-${window.end}.json`)
+    : path.join(cacheDir, "transcript.json");
+
+  // A complete cached transcript is also useful for any narrower range.
+  if (partial) {
+    const entire = await fs.readFile(path.join(cacheDir, "transcript.json"), "utf8")
+      .then(raw => JSON.parse(raw) as TranscriptSegment[]).catch(() => null);
+    if (entire) return restrictTranscript(entire, window.start, window.end);
+  }
 
   const cached = await fs
     .readFile(transcriptPath, "utf8")
@@ -348,7 +363,7 @@ export async function ensureTranscript(
     .catch(() => null);
   if (cached) {
     await log("This video was already transcribed previously - reusing that transcript.");
-    return cached;
+    return restrictTranscript(cached, window.start, window.end);
   }
 
   await setProgress(jobId, null);
@@ -358,14 +373,15 @@ export async function ensureTranscript(
   });
 
   if (segments) {
-    await log(`Found existing captions (${segments.length} lines) - skipping audio transcription.`);
+    segments = restrictTranscript(segments, window.start, window.end);
+    await log(`Found existing captions (${segments.length} lines in selected range) - skipping audio transcription.`);
   } else {
     // Never extract/upload audio for paid transcription without explicit approval.
     // Decision markers persist so a retry or server restart cannot silently charge.
     const approved = await fs.access(path.join(workDir, "transcription-approved.flag")).then(() => true).catch(() => false);
     const declined = await fs.access(path.join(workDir, "transcription-skipped.flag")).then(() => true).catch(() => false);
     if (!approved && !declined) {
-      await setTranscriptionDuration(jobId, videoDuration);
+      await setTranscriptionDuration(jobId, window.duration);
       await log("No usable captions found. Waiting for your approval before paid Whisper transcription.");
       await setProgress(jobId, null);
       await setStatus(jobId, "awaiting_transcription");
@@ -376,7 +392,7 @@ export async function ensureTranscript(
       return [];
     }
     await log("Transcription approved - extracting audio...");
-    const audioPath = await extractAudio(videoPath, workDir);
+    const audioPath = await extractAudio(videoPath, workDir, window.start, window.duration);
 
     await log("Transcribing audio - this can take a while for long videos...");
     segments = await withRetry(
@@ -386,7 +402,7 @@ export async function ensureTranscript(
           if (chunkProgress) {
             await setProgress(jobId, { label: "Transcribing audio", current: chunkProgress.current, total: chunkProgress.total });
           }
-        }),
+        }, window.start),
       { onRetry: (attempt) => log(`Transcription failed - retrying (attempt ${attempt + 1})...`) },
     );
   }
@@ -399,8 +415,8 @@ export async function ensureTranscript(
 
   await setProgress(jobId, null);
   await fs.mkdir(cacheDir, { recursive: true });
-  await fs.writeFile(transcriptPath, JSON.stringify(segments), "utf8");
-  return segments;
+  await fs.writeFile(transcriptPath, JSON.stringify(restrictTranscript(segments, window.start, window.end)), "utf8");
+  return restrictTranscript(segments, window.start, window.end);
 }
 
 export async function ensureHighlights(
