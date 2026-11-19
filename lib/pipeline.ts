@@ -206,6 +206,8 @@ export interface ClipRenderOverrides {
   reframeStyle?: ReframeStyle;
   burnCaptions?: boolean;
   animatedCaptions?: boolean;
+  extendStartSeconds?: number;
+  extendEndSeconds?: number;
 }
 
 /**
@@ -250,6 +252,15 @@ export async function regenerateClip(
     );
   }
 
+  // Regeneration can rescue a clip that was cut off before the heist payoff.
+  // It remains within the user's originally selected stream review window.
+  const videoDuration = await getMediaDuration(videoPath);
+  const reviewWindow = getReviewWindow(project.options, videoDuration);
+  const before = Math.max(0, Math.min(30, overrides.extendStartSeconds ?? 0));
+  const after = Math.max(0, Math.min(30, overrides.extendEndSeconds ?? 0));
+  const renderStart = Math.max(reviewWindow.start, clip.start - before);
+  const renderEnd = Math.min(reviewWindow.end, clip.end + after);
+
   let segments: TranscriptSegment[] = [];
   if (burnCaptions) {
     // A range-limited stream has its own transcript cache, not necessarily the full VOD.
@@ -282,7 +293,7 @@ export async function regenerateClip(
     const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, vertical, canBurnAss, reframeStyle);
 
     const gtaMode = vertical && reframeStyle === "gaming";
-    const keepRanges = await findPacingRanges(videoPath, clip.start, clip.end);
+    const keepRanges = await findPacingRanges(videoPath, renderStart, renderEnd);
     const editedDuration = keepRanges.reduce((seconds, range) => seconds + range.end - range.start, 0);
     let hookTextPath: string | undefined;
     if (gtaMode) {
@@ -318,13 +329,13 @@ export async function regenerateClip(
     const fallbackCaptions = burnCaptions && !canBurnAss
       ? await writeFallbackCaptionCards(remapTranscript(segments, keepRanges), editedDuration, path.join(scratchDir, "fallback"))
       : [];
-    await cutClip(videoPath, finalOutPath, clip.start, clip.end, { vertical, reframeStyle, subtitlesPath, hookTextPath, keepRanges, fallbackCaptions });
+    await cutClip(videoPath, finalOutPath, renderStart, renderEnd, { vertical, reframeStyle, subtitlesPath, hookTextPath, keepRanges, fallbackCaptions });
 
     // Cache-bust: the URL path is unchanged (same file), but browsers cache video
     // responses aggressively - a changing query string forces a reload of the new cut.
     const newUrl = `/clips/${jobId}/${fileName}?v=${Date.now()}`;
-    await updateClip(jobId, clipIndex, { url: newUrl });
-    return { ...clip, url: newUrl };
+    await updateClip(jobId, clipIndex, { url: newUrl, start: renderStart, end: renderEnd });
+    return { ...clip, start: renderStart, end: renderEnd, url: newUrl };
   } finally {
     await fs.rm(scratchDir, { recursive: true, force: true }).catch(() => {});
   }
