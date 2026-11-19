@@ -46,7 +46,7 @@ export interface ProcessOptions {
   reviewBeforeCutting: boolean;
 }
 
-export type ProjectStatus = "queued" | "running" | "reviewing" | "done" | "error";
+export type ProjectStatus = "queued" | "running" | "awaiting_transcription" | "reviewing" | "done" | "error";
 
 /** Fine-grained progress within the current pipeline stage (e.g. download percent, or
  * clip N of M) - separate from the plain-text log, which is a history rather than a
