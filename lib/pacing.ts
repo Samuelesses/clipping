@@ -1,4 +1,5 @@
 import { run } from "./exec";
+import type { TranscriptSegment } from "./types";
 
 /** All times are absolute source-video seconds, so clip review and captions remain aligned. */
 export interface KeepRange { start: number; end: number }
@@ -70,4 +71,26 @@ export function mapEditedTime(sourceTime: number, ranges: KeepRange[]): number {
     if (sourceTime < range.end) return result;
   }
   return result;
+}
+
+/** Rebuild word/segment timestamps after excising quiet stretches from the video. */
+export function remapTranscript(segments: TranscriptSegment[], ranges: KeepRange[]): TranscriptSegment[] {
+  const output: TranscriptSegment[] = [];
+  let editedAt = 0;
+  for (const range of ranges) {
+    const offset = editedAt - range.start;
+    for (const segment of segments) {
+      if (segment.end <= range.start || segment.start >= range.end) continue;
+      const start = Math.max(segment.start, range.start);
+      const end = Math.min(segment.end, range.end);
+      const words = segment.words?.filter(w => w.start >= start && w.start < end)
+        .map(w => ({ ...w, start: w.start + offset }));
+      output.push({
+        ...segment, start: start + offset, end: end + offset,
+        ...(words ? { words } : {}),
+      });
+    }
+    editedAt += range.end - range.start;
+  }
+  return output;
 }
