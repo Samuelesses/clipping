@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Review start/end must be valid timestamps, with end after start." }, { status: 400 });
   }
 
-  const reframeStyle: ReframeStyle = body.reframeStyle === "crop" ? "crop" : "blur";
+  const reframeStyle: ReframeStyle = body.reframeStyle === "crop" || body.reframeStyle === "blur" ? body.reframeStyle : "gaming";
 
   const sharedOptions = {
     clipCount: clamp(Number(body.clipCount) || 5, 1, 15),
