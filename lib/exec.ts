@@ -1,8 +1,26 @@
 import { execFile, spawn } from "child_process";
+import { existsSync } from "fs";
+import path from "path";
 import { promisify } from "util";
 import { NonRetryableError } from "./retry";
 
 const execFileAsync = promisify(execFile);
+
+/** Prefer Homebrew's full FFmpeg on macOS, even when regular ffmpeg shadows it in PATH. */
+function preferFullFFmpeg(command: string): string | null {
+  if (process.platform !== "darwin" || (command !== "ffmpeg" && command !== "ffprobe")) return null;
+  const prefixes = [
+    process.env.HOMEBREW_PREFIX,
+    "/opt/homebrew",
+    "/usr/local",
+  ].filter((p): p is string => Boolean(p));
+  for (const prefix of prefixes) {
+    const candidate = path.join(prefix, "opt", "ffmpeg-full", "bin", command);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 
 // YouTube sometimes challenges yt-dlp with a bot check - especially common from a
 // server/VM IP, but it can happen on a home connection too depending on the video.
@@ -21,7 +39,7 @@ export interface RunOptions {
 
 export async function run(command: string, args: string[], options: RunOptions = {}): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(command, args);
+    const child = spawn(preferFullFFmpeg(command) ?? command, args);
     let stdout = "";
     let stderr = "";
 
@@ -69,7 +87,7 @@ function buildError(command: string, args: string[], detail: string): Error {
 
 export async function checkDependency(command: string, versionFlag: string, installHint: string): Promise<void> {
   try {
-    await execFileAsync(command, [versionFlag]);
+    await execFileAsync(preferFullFFmpeg(command) ?? command, [versionFlag]);
   } catch {
     throw new Error(`Required tool "${command}" was not found on your PATH. ${installHint}`);
   }
@@ -83,6 +101,8 @@ export async function checkDependency(command: string, versionFlag: string, inst
  * erroring - being explicit avoids relying on yt-dlp's own detection working.
  */
 export async function resolveExecutablePath(command: string): Promise<string | null> {
+  const preferred = preferFullFFmpeg(command);
+  if (preferred) return preferred;
   try {
     const finder = process.platform === "win32" ? "where" : "which";
     const { stdout } = await execFileAsync(finder, [command]);
