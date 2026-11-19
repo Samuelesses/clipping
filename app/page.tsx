@@ -18,10 +18,27 @@ type RegenerateOverrides = Partial<RegenerateDefaults>;
 const ACTIVE_JOB_KEY = "clipping.activeJobId";
 const POLL_INTERVAL_MS = 1500;
 
+function parseReviewTime(value: string): number | null {
+  const parts = value.trim().split(":");
+  if (parts.length !== 3 || parts.some(part => !/^\d+$/.test(part))) return null;
+  const [hours, minutes, seconds] = parts.map(Number);
+  if (minutes > 59 || seconds > 59 || !Number.isSafeInteger(hours)) return null;
+  const total = hours * 3600 + minutes * 60 + seconds;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+function displayReviewTime(seconds: number | null | undefined): string {
+  if (seconds == null) return "";
+  return [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60]
+    .map(value => String(value).padStart(2, "0")).join(":");
+}
+
 export default function Home() {
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("dashboard");
   const [urlsText, setUrlsText] = useState("");
   const [clipCount, setClipCount] = useState(5);
+  const [reviewStartText, setReviewStartText] = useState("00:00:00");
+  const [reviewEndText, setReviewEndText] = useState("");
   const [minClipSeconds, setMinClipSeconds] = useState(12);
   const [maxClipSeconds, setMaxClipSeconds] = useState(55);
   const [vertical, setVertical] = useState(true);
@@ -174,6 +191,14 @@ export default function Home() {
       .filter(Boolean);
     if (urls.length === 0 || submitting) return;
 
+    const reviewStartSeconds = parseReviewTime(reviewStartText);
+    const reviewEndSeconds = reviewEndText.trim() ? parseReviewTime(reviewEndText) : null;
+    if (reviewStartSeconds === null || (reviewEndText.trim() && reviewEndSeconds === null) ||
+        (reviewEndSeconds !== null && reviewEndSeconds <= reviewStartSeconds)) {
+      setSubmitError("Enter valid review times (HH:MM:SS), with the end after the start.");
+      return;
+    }
+
     setSubmitting(true);
     setSubmitError(null);
 
@@ -191,6 +216,8 @@ export default function Home() {
           burnCaptions,
           animatedCaptions,
           reviewBeforeCutting,
+          reviewStartSeconds,
+          reviewEndSeconds,
         }),
       });
       const data = await response.json();
@@ -259,6 +286,8 @@ export default function Home() {
   function handleReuseSettings(p: ProjectState) {
     setUrlsText(p.url);
     setClipCount(p.options.clipCount);
+    setReviewStartText(displayReviewTime(p.options.reviewStartSeconds ?? 0));
+    setReviewEndText(displayReviewTime(p.options.reviewEndSeconds));
     setMinClipSeconds(p.options.minClipSeconds);
     setMaxClipSeconds(p.options.maxClipSeconds);
     setVertical(p.options.vertical);
@@ -421,6 +450,24 @@ export default function Home() {
             onChange={(e) => setUrlsText(e.target.value)}
             className="w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm outline-none focus:border-neutral-500"
           />
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-neutral-800 bg-neutral-950/50 p-4">
+          <label className="block text-sm font-medium text-neutral-200">How much of the stream should Clipping review?</label>
+          <p className="text-xs text-neutral-400">Choose a section of the original stream (HH:MM:SS). Leave End blank to analyse everything after Start. This limits AI analysis, audio scanning, and any paid transcription; the source video is still downloaded in full.</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-xs text-neutral-300">Start time
+              <input type="text" value={reviewStartText} onChange={e => setReviewStartText(e.target.value)} placeholder="00:00:00" inputMode="numeric" autoComplete="off" className="block w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-500" />
+            </label>
+            <label className="space-y-1 text-xs text-neutral-300">End time (optional)
+              <input type="text" value={reviewEndText} onChange={e => setReviewEndText(e.target.value)} placeholder="End of stream" inputMode="numeric" autoComplete="off" className="block w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-500" />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button type="button" onClick={() => { setReviewStartText("00:00:00"); setReviewEndText(""); }} className="rounded-md border border-neutral-700 px-3 py-1.5 text-neutral-300">Full stream</button>
+            <button type="button" onClick={() => { setReviewStartText("00:00:00"); setReviewEndText("01:00:00"); }} className="rounded-md border border-neutral-700 px-3 py-1.5 text-neutral-300">First hour</button>
+            <button type="button" onClick={() => { setReviewStartText("00:00:00"); setReviewEndText("02:00:00"); }} className="rounded-md border border-neutral-700 px-3 py-1.5 text-neutral-300">First 2 hours</button>
+          </div>
         </div>
 
         <button
