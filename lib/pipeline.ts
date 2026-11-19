@@ -3,6 +3,8 @@ import path from "path";
 import { fetchCaptions } from "./captions";
 import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurnedCaptions } from "./ffmpeg";
 import { findHighlights } from "./highlights";
+import { findAudioEventCandidates } from "./audioEvents";
+import { rankVisualHighlights } from "./visualHighlights";
 import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, updateClip } from "./projects";
 import { withRetry } from "./retry";
 import { writeClipAss } from "./subtitles";
@@ -63,7 +65,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     const segments = await ensureTranscript(jobId, workDir, url, videoPath, log);
 
     await log(`Transcript ready (${segments.length} segments). Asking the model to find the best parts...`);
-    const highlights = await ensureHighlights(jobId, workDir, segments, info, options, log);
+    const highlights = await ensureHighlights(jobId, workDir, videoPath, segments, info, options, log);
 
     if (highlights.length === 0) {
       throw new Error("The model didn't return any candidate clips - try a different video or lower the clip count.");
@@ -373,7 +375,9 @@ export async function ensureTranscript(
   }
 
   if (!segments || segments.length === 0) {
-    throw new Error("Could not get a transcript - the video may have no speech to analyze.");
+    // Gameplay-only streams may be worth clipping even when nobody speaks.
+    await log("No speech detected; proceeding with gameplay/audio event detection.");
+    segments = [];
   }
 
   await setProgress(jobId, null);
@@ -385,6 +389,7 @@ export async function ensureTranscript(
 export async function ensureHighlights(
   jobId: string,
   workDir: string,
+  videoPath: string,
   segments: TranscriptSegment[],
   info: VideoInfo,
   options: ProcessOptions,
@@ -401,9 +406,45 @@ export async function ensureHighlights(
     return cached;
   }
 
-  const highlights = await withRetry(() => findHighlights(segments, info, options), {
-    onRetry: (attempt) => log(`Highlight selection failed - retrying (attempt ${attempt + 1})...`),
-  });
+  // Shortlist more candidates than requested, then inspect actual gameplay frames.
+  const candidateCount = Math.min(20, Math.max(options.clipCount, options.clipCount * 2));
+  const transcriptCandidates = segments.length > 0
+    ? await withRetry(() => findHighlights(segments, info, options, candidateCount), {
+        onRetry: (attempt) => log(`Highlight selection failed - retrying (attempt ${attempt + 1})...`),
+      })
+    : [];
+  let audioCandidates: HighlightClip[] = [];
+  if (process.env.AUDIO_EVENT_DETECTION !== "false") {
+    try {
+      await log("Scanning stream-wide audio for unusually energetic moments...");
+      audioCandidates = await findAudioEventCandidates(videoPath, info, options, Math.min(8, options.clipCount + 3));
+      await log(`Found ${audioCandidates.length} audio event candidates.`);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      await log(`Audio event detection skipped (${reason}).`);
+    }
+  }
+  const candidates: HighlightClip[] = [...transcriptCandidates];
+  for (const audio of audioCandidates) {
+    if (candidates.some(clip => Math.max(0, Math.min(clip.end, audio.end) - Math.max(clip.start, audio.start)) >
+      (audio.end - audio.start) * 0.35)) continue;
+    candidates.push(audio);
+    if (candidates.length >= 24) break;
+  }
+  let highlights = transcriptCandidates.slice(0, options.clipCount);
+  if (process.env.VISUAL_REVIEW_ENABLED !== "false" && candidates.length > 0) {
+    try {
+      await log(`Inspecting gameplay screenshots for ${candidates.length} candidate clips...`);
+      highlights = await rankVisualHighlights(videoPath, workDir, candidates, options.clipCount);
+      await log("Gameplay-aware candidate ranking complete.");
+    } catch (err) {
+      // Vision is an enhancement; a failed visual analysis must not ruin a full VOD job.
+      const message = err instanceof Error ? err.message : String(err);
+      // Audio peaks alone are not proof of a good clip. Never export them without review.
+      highlights = transcriptCandidates.slice(0, options.clipCount);
+      await log(`Visual ranking unavailable (${message}). Using transcript picks only.`);
+    }
+  }
   await fs.writeFile(highlightsPath, JSON.stringify(highlights), "utf8");
   return highlights;
 }

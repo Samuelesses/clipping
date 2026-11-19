@@ -36,6 +36,7 @@ export async function findHighlights(
   segments: TranscriptSegment[],
   info: VideoInfo,
   options: ProcessOptions,
+  candidateCount = options.clipCount,
 ): Promise<HighlightClip[]> {
   const client = new OpenAI();
   const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
@@ -46,7 +47,7 @@ export async function findHighlights(
 
   // Ask for a few extra candidates - overlap dedup below can drop some, and this keeps
   // the final count close to what was actually requested.
-  const requestCount = Math.min(options.clipCount + 3, 20);
+  const requestCount = Math.min(Math.max(candidateCount + 3, options.clipCount), 20);
 
   const completion = await client.chat.completions.parse({
     model,
@@ -63,6 +64,14 @@ export async function findHighlights(
           "- Hot takes and drama: a strong opinion, a callout, trash talk, beef with another " +
           "creator, or the streamer saying something blunt/controversial about a person, game, or event\n" +
           "- Self-contained stories: a short anecdote or take that stands on its own\n" +
+          "Prioritize moments with an immediate and understandable hook, a clear setup, and a satisfying " +
+          "payoff. A stranger should understand why to care within the first 1-3 seconds. Reject clips " +
+          "that start with greetings, filler, context-heavy references, long pauses, meandering discussion, " +
+          "or where the payoff is only implied. Do not invent tension, dialogue, context or an outcome. " +
+          "Strong moments can be funny, surprising, useful, impressive, or emotional; do not force " +
+          "controversy when the footage does not support it. Write a short, specific, truthful title " +
+          "that creates curiosity without giving away the payoff. Prefer a complete 15-35 second " +
+          "moment over a longer one with dead air, when the user's length limits allow it. " +
           "Prioritize whatever is most likely to get clicks and reactions, even if it's blunt, opinionated, " +
           "or dramatic - don't soften or filter out controversial moments, just report them faithfully. " +
           "Each clip must make sense without any extra context and should isolate a single moment rather " +
@@ -118,11 +127,14 @@ export async function findHighlights(
         end: Math.min(info.duration, snapEnd(end, segments)),
       };
     })
-    .map((clip) => enforceMinDuration(clip, segments, options.minClipSeconds, info.duration))
+    // Avoid padding short moments with unrelated dialogue just to fill a quota. 
+    // A genuinely short payoff is usually better dropped than stretched into dead air. 
+    .filter((clip) => clip.end - clip.start >= options.minClipSeconds)
     .filter((clip): clip is HighlightClip => clip !== null)
-    .map((clip) => capDuration(clip, segments, options.maxClipSeconds));
+    .map((clip) => capDuration(clip, segments, options.maxClipSeconds)) 
+    .filter((clip) => clip.end - clip.start >= options.minClipSeconds);
 
-  return dedupeOverlapping(clips).slice(0, options.clipCount);
+  return dedupeOverlapping(clips).slice(0, candidateCount);
 }
 
 // The prompt asks the model to never come in under the requested minimum, but (like the
@@ -167,7 +179,7 @@ export function enforceMinDuration(
 // transcript segment boundary at or before the cap so the clip still ends cleanly,
 // rather than a hard mid-sentence cut.
 export function capDuration(clip: HighlightClip, segments: TranscriptSegment[], maxClipSeconds: number): HighlightClip {
-  const hardCapSeconds = maxClipSeconds + Math.min(20, maxClipSeconds * 0.25);
+  const hardCapSeconds = maxClipSeconds;
   if (clip.end - clip.start <= hardCapSeconds) return clip;
 
   const cappedEnd = clip.start + hardCapSeconds;
