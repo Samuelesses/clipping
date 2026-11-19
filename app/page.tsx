@@ -1023,7 +1023,7 @@ function RegeneratePanel({
         <NumberField label="Extra seconds after" value={extendEndSeconds} onChange={setExtendEndSeconds} min={0} max={30} />
       </div>
       <p className="text-xs text-neutral-500">Extends footage by up to 30 seconds on each side without crossing the selected review range.</p>
-      {error && <p className="text-sm text-red-400">{error}</p>
+      {error && <p className="text-sm text-red-400">{error}</p>}
       <div className="flex items-center gap-3">
         <button
           type="button"
