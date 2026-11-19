@@ -62,7 +62,8 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     await setTitle(jobId, info.title);
 
     const videoPath = await ensureVideoDownloaded(jobId, url, info, log);
-    const segments = await ensureTranscript(jobId, workDir, url, videoPath, log);
+    const segments = await ensureTranscript(jobId, workDir, url, videoPath, info.duration, log);
+    if (segments === null) return; // Paused until the user decides whether to pay for transcription.
 
     await log(`Transcript ready (${segments.length} segments). Asking the model to find the best parts...`);
     const highlights = await ensureHighlights(jobId, workDir, videoPath, segments, info, options, log);
@@ -333,8 +334,9 @@ export async function ensureTranscript(
   workDir: string,
   url: string,
   videoPath: string,
+  videoDuration: number,
   log: (message: string) => Promise<void>,
-): Promise<TranscriptSegment[]> {
+): Promise<TranscriptSegment[] | null> {
   // Same idea as the video itself: cached by URL so a transcript, once fetched or
   // transcribed, is never redone for the same video again.
   const cacheDir = cacheDirFor(url);
@@ -358,7 +360,21 @@ export async function ensureTranscript(
   if (segments) {
     await log(`Found existing captions (${segments.length} lines) - skipping audio transcription.`);
   } else {
-    await log("No captions available - extracting audio for transcription...");
+    // Never extract/upload audio for paid transcription without explicit approval.
+    // Decision markers persist so a retry or server restart cannot silently charge.
+    const approved = await fs.access(path.join(workDir, "transcription-approved.flag")).then(() => true).catch(() => false);
+    const declined = await fs.access(path.join(workDir, "transcription-skipped.flag")).then(() => true).catch(() => false);
+    if (!approved && !declined) {
+      await log("No usable captions found. Waiting for your approval before paid Whisper transcription.");
+      await setProgress(jobId, null);
+      await setStatus(jobId, "awaiting_transcription");
+      return null;
+    }
+    if (declined) {
+      await log("Transcription declined. Continuing with gameplay/audio detection only.");
+      return [];
+    }
+    await log("Transcription approved - extracting audio...");
     const audioPath = await extractAudio(videoPath, workDir);
 
     await log("Transcribing audio - this can take a while for long videos...");
