@@ -10,6 +10,7 @@ import { withRetry } from "./retry";
 import { getReviewWindow, restrictTranscript } from "./reviewRange";
 import { writeClipAss, writeGtaHookText, writeFallbackCaptionCards } from "./subtitles";
 import { findPacingRanges, remapTranscript } from "./pacing";
+import { detectFacecam } from "./facecam";
 import { transcribeAudio } from "./transcribe";
 import type { GeneratedClip, HighlightClip, ProcessOptions, ReframeStyle, TranscriptSegment, VideoInfo } from "./types";
 import { cacheDirFor } from "./videoCache";
@@ -104,6 +105,9 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
     await fs.mkdir(clipsDir, { recursive: true });
 
     const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, options.vertical, canBurnAss, options.reframeStyle);
+    const facecam = options.vertical && options.reframeStyle === "gaming"
+      ? await detectFacecam(url, videoPath, reviewWindow.start, reviewWindow.end, log)
+      : null;
 
     // Resume support: a prior attempt may have already cut and recorded some clips
     // before failing later on - pick up right after the last one.
@@ -157,6 +161,7 @@ export async function runPipeline(jobId: string, url: string, options: ProcessOp
         hookTextPath,
         keepRanges,
         fallbackCaptions,
+        facecam,
       });
 
       await addClip(jobId, { ...highlight, url: `/clips/${jobId}/${fileName}` });
@@ -301,6 +306,7 @@ export async function regenerateClip(
     const { captionCanvas, videoBottomY } = await computeCaptionCanvas(videoPath, vertical, canBurnAss, reframeStyle);
 
     const gtaMode = vertical && reframeStyle === "gaming";
+    const facecam = gtaMode ? await detectFacecam(project.url, videoPath, renderStart, renderEnd) : null;
     const keepRanges = await findPacingRanges(videoPath, renderStart, renderEnd);
     const editedDuration = keepRanges.reduce((seconds, range) => seconds + range.end - range.start, 0);
     let hookTextPath: string | undefined;
@@ -337,7 +343,7 @@ export async function regenerateClip(
     const fallbackCaptions = burnCaptions && !canBurnAss
       ? await writeFallbackCaptionCards(remapTranscript(segments, keepRanges), editedDuration, path.join(scratchDir, "fallback"))
       : [];
-    await cutClip(videoPath, finalOutPath, renderStart, renderEnd, { vertical, reframeStyle, subtitlesPath, hookTextPath, keepRanges, fallbackCaptions });
+    await cutClip(videoPath, finalOutPath, renderStart, renderEnd, { vertical, reframeStyle, subtitlesPath, hookTextPath, keepRanges, fallbackCaptions, facecam });
 
     // Cache-bust: the URL path is unchanged (same file), but browsers cache video
     // responses aggressively - a changing query string forces a reload of the new cut.
