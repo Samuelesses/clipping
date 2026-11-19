@@ -35,6 +35,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Add an OpenAI API key in Settings before creating a project." }, { status: 400 });
   }
 
+  const reviewStartSeconds = body.reviewStartSeconds == null ? 0 : Number(body.reviewStartSeconds);
+  const reviewEndSeconds = body.reviewEndSeconds == null ? null : Number(body.reviewEndSeconds);
+  if (!Number.isSafeInteger(reviewStartSeconds) || reviewStartSeconds < 0 ||
+      (reviewEndSeconds !== null && (!Number.isSafeInteger(reviewEndSeconds) ||
+        reviewEndSeconds <= reviewStartSeconds))) {
+    return NextResponse.json({ error: "Review start/end must be valid timestamps, with end after start." }, { status: 400 });
+  }
+
   const reframeStyle: ReframeStyle = body.reframeStyle === "crop" ? "crop" : "blur";
 
   const sharedOptions = {
@@ -46,6 +54,8 @@ export async function POST(request: Request) {
     burnCaptions: body.burnCaptions !== false,
     animatedCaptions: body.animatedCaptions === true,
     reviewBeforeCutting: body.reviewBeforeCutting === true,
+    reviewStartSeconds,
+    reviewEndSeconds,
   };
 
   if (sharedOptions.minClipSeconds > sharedOptions.maxClipSeconds) {
