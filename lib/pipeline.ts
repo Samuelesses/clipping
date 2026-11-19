@@ -237,6 +237,9 @@ export async function regenerateClip(
   const animatedCaptions = overrides.animatedCaptions ?? project.options.animatedCaptions;
   const burnCaptions = overrides.burnCaptions ?? project.options.burnCaptions;
   const canBurnAss = burnCaptions && await supportsBurnedCaptions();
+  if ((vertical && reframeStyle === "gaming") || (burnCaptions && !canBurnAss)) {
+    if (!(await supportsDrawtext())) throw new Error(ffmpegTextInstallMessage());
+  }
 
   const cacheDir = cacheDirFor(project.url);
   const videoCandidates = (await fs.readdir(cacheDir).catch(() => [] as string[])).filter(
