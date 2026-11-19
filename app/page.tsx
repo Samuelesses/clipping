@@ -55,6 +55,9 @@ export default function Home() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyBusy, setApiKeyBusy] = useState(false);
   const [apiKeyFeedback, setApiKeyFeedback] = useState<string | null>(null);
+  const [gtaFontInstalled, setGtaFontInstalled] = useState<boolean | null>(null);
+  const [gtaFontFeedback, setGtaFontFeedback] = useState<string | null>(null);
+  const [gtaFontBusy, setGtaFontBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -75,6 +78,7 @@ export default function Home() {
   useEffect(() => {
     refreshProjects();
     refreshApiKeyStatus();
+    refreshGtaFontStatus();
     const stored = window.localStorage.getItem(ACTIVE_JOB_KEY);
     if (stored) setActiveJobId(stored);
   }, []);
@@ -117,6 +121,34 @@ export default function Home() {
       setReviewJobId(null);
     }
   }, [project, reviewJobId]);
+
+  async function refreshGtaFontStatus() {
+    try {
+      const result = await fetch("/api/settings/gta-font", { cache: "no-store" });
+      if (!result.ok) throw new Error("Font status unavailable.");
+      const data: { installed: boolean } = await result.json();
+      setGtaFontInstalled(data.installed);
+    } catch {
+      setGtaFontInstalled(null);
+    }
+  }
+
+  async function uploadGtaFont(file: File | undefined) {
+    if (!file) return;
+    setGtaFontBusy(true);
+    setGtaFontFeedback(null);
+    try {
+      const form = new FormData();
+      form.set("font", file);
+      const response = await fetch("/api/settings/gta-font", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not upload font.");
+      setGtaFontInstalled(true);
+      setGtaFontFeedback("Pricedown font saved locally. New and regenerated GTA clips will use it.");
+    } catch (error) {
+      setGtaFontFeedback(error instanceof Error ? error.message : "Font upload failed.");
+    } finally { setGtaFontBusy(false); }
+  }
 
   async function refreshApiKeyStatus() {
     try {
@@ -428,6 +460,31 @@ export default function Home() {
               </div>
               {apiKeyFeedback && <p role="status" className="text-sm text-neutral-300">{apiKeyFeedback}</p>}
             </form>
+          </div>
+          <div className="studio-panel space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
+            <div className="flex items-center justify-between gap-4">
+              <h3 className="text-lg font-semibold">GTA title and caption font</h3>
+              <span className="text-sm text-neutral-400">
+                {gtaFontInstalled === true ? "Pricedown ready" : gtaFontInstalled === false ? "Using fallback font" : "Checking"}
+              </span>
+            </div>
+            <p className="text-sm text-neutral-300">
+              Upload your licensed Pricedown Black .ttf or .otf file. Vicecut uses the genuine
+              GTA-style typeface for opening hooks and dialogue captions. The font stays on
+              this Mac and is never committed to GitHub.
+            </p>
+            <p className="text-sm text-neutral-400">
+              Download the free desktop-licensed Pricedown Black from{" "}
+              <a className="underline underline-offset-2 text-pink-300" href="https://www.dafont.com/pricedown.font"
+                target="_blank" rel="noopener noreferrer">Typodermic&apos;s Pricedown listing</a>, then upload the font file below.
+            </p>
+            <label className="block text-sm font-semibold text-neutral-200" htmlFor="gta-font-file">
+              {gtaFontBusy ? "Uploading..." : "Choose Pricedown font file"}
+            </label>
+            <input id="gta-font-file" type="file" accept=".ttf,.otf" disabled={gtaFontBusy}
+              onChange={e => { const file=e.target.files?.[0]; void uploadGtaFont(file); e.target.value = ""; }}
+              className="block w-full text-sm text-neutral-300 file:mr-4 file:rounded-lg file:border-0 file:bg-pink-300 file:px-4 file:py-2 file:font-semibold file:text-neutral-950" />
+            {gtaFontFeedback && <p role="status" className="text-sm text-neutral-200">{gtaFontFeedback}</p>}
           </div>
         </section>
       )}
