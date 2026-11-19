@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import OpenAI from "openai";
+import { createOpenAIClient } from "./openaiKey";
 import { z } from "zod";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { run } from "./exec";
@@ -63,7 +63,7 @@ export async function rankVisualHighlights(
     }
   }
 
-  const client = new OpenAI();
+  const client = await createOpenAIClient();
   const completion = await client.chat.completions.parse({
     model: process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini",
     messages: [{
