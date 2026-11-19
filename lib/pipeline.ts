@@ -5,7 +5,7 @@ import { cutClip, extractAudio, getVideoDimensions, hasVideoStream, supportsBurn
 import { findHighlights } from "./highlights";
 import { findAudioEventCandidates } from "./audioEvents";
 import { rankVisualHighlights } from "./visualHighlights";
-import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, updateClip } from "./projects";
+import { addClip, appendLog, loadProject, setPendingHighlights, setProgress, setStatus, setTitle, setTranscriptionDuration, updateClip } from "./projects";
 import { withRetry } from "./retry";
 import { writeClipAss } from "./subtitles";
 import { transcribeAudio } from "./transcribe";
@@ -365,6 +365,7 @@ export async function ensureTranscript(
     const approved = await fs.access(path.join(workDir, "transcription-approved.flag")).then(() => true).catch(() => false);
     const declined = await fs.access(path.join(workDir, "transcription-skipped.flag")).then(() => true).catch(() => false);
     if (!approved && !declined) {
+      await setTranscriptionDuration(jobId, videoDuration);
       await log("No usable captions found. Waiting for your approval before paid Whisper transcription.");
       await setProgress(jobId, null);
       await setStatus(jobId, "awaiting_transcription");
