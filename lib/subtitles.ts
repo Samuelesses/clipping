@@ -6,7 +6,8 @@ const MAX_TITLE_LENGTH = 70;
 // Keep each burned caption card short and punchy - long lines wrap to 3+ lines and can
 // grow tall enough to run off the top/bottom of the frame, and short bursts read faster
 // on short-form video anyway (closer to how TikTok/Shorts captions are usually cut).
-const MAX_WORDS_PER_CAPTION = 5;
+const MAX_WORDS_PER_CAPTION = 4;
+const MAX_CAPTION_CHARACTERS = 24;
 
 interface Cue {
   start: number;
@@ -50,11 +51,11 @@ export async function writeClipAss(
 ): Promise<void> {
   const gtaFont = gtaMode ? await getGtaFontPath() : null;
   const captionFontName = gtaFont ? "Pricedown" : "Montserrat ExtraBold";
-  const captionFontSize = Math.round(canvasHeight * (gtaMode ? 0.036 : 0.038));
+  const captionFontSize = Math.round(canvasHeight * (gtaMode ? 0.042 : 0.038));
   const titleFontSize = Math.round(canvasHeight * 0.062);
   const titleMarginV = Math.round(canvasHeight * 0.09);
-  const sideMargin = gtaMode ? 145 : Math.round(canvasWidth * 0.06);
-  const rightMargin = gtaMode ? 265 : sideMargin;
+  const sideMargin = gtaMode ? 140 : Math.round(canvasWidth * 0.06);
+  const rightMargin = gtaMode ? 205 : sideMargin;
 
   // When we know where the actual video content ends (vertical mode, where the sharp
   // foreground video sits centered over a blurred fill), anchor captions just under it
@@ -66,7 +67,7 @@ export async function writeClipAss(
   const captionGap = Math.round(canvasHeight * 0.02);
   const maxCaptionMarginV = canvasHeight - Math.round(captionFontSize * 2.6);
   const captionAlignment = gtaMode ? 8 : (videoBottomY !== null ? 8 : 2);
-  const captionMarginV = gtaMode ? 1070 :
+  const captionMarginV = gtaMode ? 1285 :
     videoBottomY !== null ? Math.min(videoBottomY + captionGap, maxCaptionMarginV) : Math.round(canvasHeight * 0.1);
 
   // Bright gold title (classic high-contrast "clip title" look), clean white captions -
@@ -76,7 +77,7 @@ export async function writeClipAss(
   const captionColour = "&H00FFFFFF";
   // Same gold as the title, but as a bare BGR inline override (no alpha byte) for the
   // \c tag used to pop the currently-spoken word in animated captions.
-  const highlightInline = "&H00D7FF&";
+  const highlightInline = "&H00C7FF&";
 
   const header =
     "[Script Info]\n" +
@@ -92,7 +93,7 @@ export async function writeClipAss(
     "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, " +
     "Alignment, MarginL, MarginR, MarginV, Encoding\n" +
     `Style: Caption,${captionFontName},${captionFontSize},${captionColour},&H000000FF,&H00000000,` +
-    `&H00000000,0,0,0,0,100,100,0,0,1,3.5,1.5,${captionAlignment},${sideMargin},${rightMargin},${captionMarginV},1\n` +
+    `&H00000000,1,0,0,0,100,100,0,0,1,5,2,${captionAlignment},${sideMargin},${rightMargin},${captionMarginV},1\n` +
     `Style: Title,Anton,${titleFontSize},${titleColour},&H000000FF,&H00000000,&H00000000,0,0,0,0,` +
     `100,100,0,0,1,4.5,2,8,${sideMargin},${sideMargin},${titleMarginV},1\n\n` +
     "[Events]\n" +
@@ -126,39 +127,69 @@ function buildPlainCaptionCues(segments: TranscriptSegment[], clipStart: number,
 }
 
 /**
- * Flattens per-word timestamps from the segments overlapping this clip into
- * <=MAX_WORDS_PER_CAPTION-word chunks, re-based to the clip's own timeline. Returns
- * null if any overlapping segment lacks word timing, so the caller falls back to
- * plain static captions rather than mixing animated and static cards.
+ * GTA dialogue cards: no arbitrary 5-word breaks. Split at real pauses and sentence
+ * endings, limit physical width, then render a stable card while the active word turns
+ * gold. When external captions have segment timing but no word timings, interpolate
+ * the words across that segment so the whole clip still gets karaoke highlighting.
+ * Interpolated timings are approximate (no forced alignment is performed).
  */
 function buildWordChunks(segments: TranscriptSegment[], clipStart: number, clipEnd: number): TimedWord[][] | null {
-  const relevant = segments.filter((s) => s.end > clipStart && s.start < clipEnd);
-  if (relevant.length === 0) return null;
-  if (relevant.some((s) => !s.words || s.words.length === 0)) return null;
+  const relevant = segments.filter(s => s.end > clipStart && s.start < clipEnd);
+  if (!relevant.length) return null;
 
   const flatWords: TimedWord[] = [];
   for (const segment of relevant) {
-    const words = segment.words!;
-    for (let i = 0; i < words.length; i++) {
-      const wordStart = words[i].start;
-      const wordEnd = i + 1 < words.length ? words[i + 1].start : segment.end;
-      if (wordEnd <= clipStart || wordStart >= clipEnd) continue;
-      const text = sanitizeAssText(words[i].text);
-      if (!text) continue;
+    const rawWords = segment.words?.length ? segment.words : null;
+    const words = rawWords
+      ? rawWords.map((word, index) => ({
+          text: word.text,
+          start: word.start,
+          end: index + 1 < rawWords.length ? rawWords[index + 1].start : segment.end,
+        }))
+      : (() => {
+          const tokens = sanitizeAssText(segment.text).split(/\s+/).filter(Boolean);
+          if (!tokens.length) return [];
+          const totalWeight = tokens.reduce((sum, word) => sum + Math.max(2, word.length), 0);
+          let weightedStart = 0;
+          return tokens.map(word => {
+            const from = weightedStart;
+            weightedStart += Math.max(2, word.length);
+            const span = Math.max(0.1, segment.end - segment.start);
+            return {
+              text: word,
+              start: segment.start + span * from / totalWeight,
+              end: segment.start + span * weightedStart / totalWeight,
+            };
+          });
+        })();
+    for (const word of words) {
+      const text = sanitizeAssText(word.text).replace(/^>>\s*/, "");
+      if (!text || word.end <= clipStart || word.start >= clipEnd) continue;
       flatWords.push({
         text,
-        start: Math.max(0, wordStart - clipStart),
-        end: Math.min(clipEnd - clipStart, wordEnd - clipStart),
+        start: Math.max(0, word.start - clipStart),
+        end: Math.min(clipEnd - clipStart, word.end - clipStart),
       });
     }
   }
-  if (flatWords.length === 0) return null;
+  if (!flatWords.length) return null;
+  flatWords.sort((a, b) => a.start - b.start);
 
   const chunks: TimedWord[][] = [];
-  for (let i = 0; i < flatWords.length; i += MAX_WORDS_PER_CAPTION) {
-    chunks.push(flatWords.slice(i, i + MAX_WORDS_PER_CAPTION).filter((w) => w.end > w.start));
+  let current: TimedWord[] = [];
+  const flush = () => { if (current.length) chunks.push(current); current = []; };
+  for (const word of flatWords) {
+    const prior = current[current.length - 1];
+    const pause = prior ? word.start - prior.end : 0;
+    const length = [...current.map(item => item.text), word.text].join(" ").length;
+    const phraseTime = current.length ? word.end - current[0].start : 0;
+    if (current.length && (pause >= 0.38 || current.length >= MAX_WORDS_PER_CAPTION ||
+        length > MAX_CAPTION_CHARACTERS || phraseTime > 2.5)) flush();
+    current.push(word);
+    if (/[.!?]$/.test(word.text)) flush();
   }
-  return chunks.filter((chunk) => chunk.length > 0);
+  flush();
+  return chunks;
 }
 
 /** One Dialogue line per word in the chunk, each showing the full chunk text with just
@@ -220,26 +251,35 @@ function formatAssTime(totalSeconds: number): string {
   return `${hours}:${pad(minutes)}:${pad(seconds)}.${pad(centis)}`;
 }
 
-/** A short, deliberate two-line opening hook rendered by drawtext independently of libass. */
+/** Balance a persistent GTA title into two visually similar, readable lines. */
 export async function writeGtaHookText(title: string, outPath: string): Promise<void> {
   const cleaned = title.toUpperCase()
-    .normalize("NFKD")
-    .replace(/[^A-Z0-9?!'& -]/g, "")
-    .replace(/\s+/g, " ").trim().slice(0, 48) || "GTA MOMENT";
+    .normalize("NFKD").replace(/[^A-Z0-9?!'& -]/g, "")
+    .replace(/\s+/g, " ").trim().slice(0, 44) || "GTA MOMENT";
   const words = cleaned.split(" ");
-  let first = "";
-  let second = "";
-  for (const word of words) {
-    const firstCandidate = (first + " " + word).trim();
-    if (!second && firstCandidate.length <= 18) {
-      first = firstCandidate;
-      continue;
-    }
-    const secondCandidate = (second + " " + word).trim();
-    if (secondCandidate.length <= 20) second = secondCandidate;
-    else break; // Prefer a readable hook over overflowing the portrait frame.
+  if (words.length === 1) {
+    await fs.writeFile(outPath, cleaned, "utf8");
+    return;
   }
-  await fs.writeFile(outPath, [first, second].filter(Boolean).join("\n"), "utf8");
+  let best: string[] = [cleaned];
+  let score = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const first = words.slice(0, i).join(" ");
+    const second = words.slice(i).join(" ");
+    if (first.length > 19 || second.length > 19) continue;
+    // Avoid one-word orphan lines and prefer roughly even line lengths.
+    const imbalance = Math.abs(first.length - second.length);
+    const orphan = Math.min(i, words.length - i) === 1 ? 7 : 0;
+    const candidate = imbalance + orphan;
+    if (candidate < score) { score = candidate; best = [first, second]; }
+  }
+  if (best.length === 1) {
+    // Oversized headlines are deliberately shortened rather than wrapped into 3+ lines.
+    const shorter = words.slice(0, 5);
+    const split = Math.max(1, Math.floor(shorter.length / 2));
+    best = [shorter.slice(0, split).join(" "), shorter.slice(split).join(" ")];
+  }
+  await fs.writeFile(outPath, best.filter(Boolean).join("\n"), "utf8");
 }
 
 export interface FallbackCaption {
