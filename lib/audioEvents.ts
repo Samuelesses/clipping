@@ -1,4 +1,5 @@
 import { run } from "./exec";
+import { getReviewWindow } from "./reviewRange";
 import type { HighlightClip, ProcessOptions, VideoInfo } from "./types";
 
 interface AudioWindow { at: number; db: number }
@@ -14,8 +15,11 @@ export async function findAudioEventCandidates(
   options: ProcessOptions,
   maxCandidates = 8,
 ): Promise<HighlightClip[]> {
+  const window = getReviewWindow(options, info.duration);
   const output = await run("ffmpeg", [
-    "-hide_banner", "-nostats", "-loglevel", "error", "-i", videoPath,
+    "-hide_banner", "-nostats", "-loglevel", "error",
+    ...(window.start > 0 ? ["-ss", String(window.start)] : []), "-i", videoPath,
+    "-t", String(window.duration),
     "-vn", "-ac", "1", "-af",
     "aresample=8000,asetnsamples=n=24000:p=1,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
     "-f", "null", "-",
@@ -28,7 +32,7 @@ export async function findAudioEventCandidates(
     const level = line.match(/^lavfi\.astats\.Overall\.RMS_level=([-\d.]+)/);
     if (level && at !== null) {
       const db = Number(level[1]);
-      if (Number.isFinite(db)) windows.push({ at, db });
+      if (Number.isFinite(db)) windows.push({ at: window.start + at, db });
       at = null;
     }
   }
@@ -37,7 +41,7 @@ export async function findAudioEventCandidates(
   const median = sorted[Math.floor(sorted.length / 2)];
   const minSeconds = Math.max(5, options.minClipSeconds);
   const length = Math.min(options.maxClipSeconds, Math.max(minSeconds, 30));
-  if (info.duration < length) return [];
+  if (window.duration < length) return [];
   const selected: AudioWindow[] = [];
   for (const window of windows.slice().sort((a,b) => b.db-a.db)) {
     // Require an actual spike above typical stream volume, not just constant music.
@@ -47,8 +51,8 @@ export async function findAudioEventCandidates(
     if (selected.length === maxCandidates) break;
   }
   return selected.map(({ at }) => {
-    const start = Math.max(0, Math.min(info.duration-length, at-length*0.35));
-    const end = Math.min(info.duration, start+length);
+    const start = Math.max(window.start, Math.min(window.end-length, at-length*0.35));
+    const end = Math.min(window.end, start+length);
     const timestamp = Math.floor(at / 60) + ":" + String(Math.floor(at % 60)).padStart(2, "0");
     return {
       title: `Potential gameplay moment at ${timestamp}`,
