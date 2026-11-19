@@ -40,7 +40,7 @@ export async function findAudioEventCandidates(
   const sorted = windows.map(w => w.db).sort((a,b) => a-b);
   const median = sorted[Math.floor(sorted.length / 2)];
   const minSeconds = Math.max(5, options.minClipSeconds);
-  const length = Math.min(options.maxClipSeconds, Math.max(minSeconds, 30));
+  const length = Math.min(options.maxClipSeconds, Math.max(minSeconds, 55));
   if (window.duration < length) return [];
   const selected: AudioWindow[] = [];
   for (const window of windows.slice().sort((a,b) => b.db-a.db)) {
@@ -51,7 +51,7 @@ export async function findAudioEventCandidates(
     if (selected.length === maxCandidates) break;
   }
   return selected.map(({ at }) => {
-    const start = Math.max(window.start, Math.min(window.end-length, at-length*0.35));
+    const start = Math.max(window.start, Math.min(window.end-length, at-length*0.38));
     const end = Math.min(window.end, start+length);
     const timestamp = Math.floor(at / 60) + ":" + String(Math.floor(at % 60)).padStart(2, "0");
     return {
