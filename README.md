@@ -109,6 +109,20 @@ queue and start automatically as slots free up. That means:
 - [`ffmpeg`](https://ffmpeg.org/download.html) (includes `ffprobe`) on your PATH
 - An [OpenAI API key](https://platform.openai.com/api-keys)
 
+## Review just part of a long stream
+
+When creating a project, choose **Start time** and **End time** using
+`HH:MM:SS` (for example, `02:00:00` to `04:00:00` reviews hours 2–4).
+Leave End blank to review the remainder of the stream. Quick presets include
+Full stream, First hour and First 2 hours.
+
+The selected range limits transcript-based highlight selection, audio-peak
+scanning, visual shortlist review, and Whisper transcription (including its
+approval cost estimate). Clips retain timestamps from the original recording.
+The **source stream is still downloaded in full**; this option reduces analysis
+and transcription work, not the original download size. The app checks that
+your chosen start occurs within the actual source duration.
+
 ## Transcription approval
 
 The app checks for existing captions before using Whisper. If usable captions
