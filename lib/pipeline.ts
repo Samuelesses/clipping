@@ -431,7 +431,7 @@ export async function ensureHighlights(
     candidates.push(audio);
     if (candidates.length >= 24) break;
   }
-  let highlights = candidates.slice(0, options.clipCount);
+  let highlights = transcriptCandidates.slice(0, options.clipCount);
   if (process.env.VISUAL_REVIEW_ENABLED !== "false" && candidates.length > 0) {
     try {
       await log(`Inspecting gameplay screenshots for ${candidates.length} candidate clips...`);
@@ -440,7 +440,9 @@ export async function ensureHighlights(
     } catch (err) {
       // Vision is an enhancement; a failed visual analysis must not ruin a full VOD job.
       const message = err instanceof Error ? err.message : String(err);
-      await log(`Visual ranking unavailable (${message}). Using fallback candidate ranking instead.`);
+      // Audio peaks alone are not proof of a good clip. Never export them without review.
+      highlights = transcriptCandidates.slice(0, options.clipCount);
+      await log(`Visual ranking unavailable (${message}). Using transcript picks only.`);
     }
   }
   await fs.writeFile(highlightsPath, JSON.stringify(highlights), "utf8");
