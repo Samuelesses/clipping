@@ -1,5 +1,23 @@
 # Clipping
 
+## Livestream highlight improvements
+
+The upgraded pipeline shortlists moments from speech, scans the full stream for
+unusually energetic audio, and visually re-ranks those candidate moments with
+two screenshots each. Audio spikes are only possible events (not verified
+gameplay wins/crashes), so audio-only moments are **not** selected if the visual
+review fails. Review and trim remain available before exporting.
+
+- Default clips are now 12–55 seconds; generated titles only display at the
+  beginning, and animated captions are enabled by default.
+- `VISUAL_REVIEW_ENABLED=false` disables screenshots and visual API calls.
+- `AUDIO_EVENT_DETECTION=false` skips the full-stream audio scan.
+- `OPENAI_VISION_MODEL` selects the image-capable ranking model (default
+  `gpt-4.1-mini`). Image analysis incurs additional API cost.
+- Visual selection currently uses sparse still frames and is not full motion
+  understanding or automated gameplay-event recognition. For best results,
+  manually check candidate moments and export only the clips worth posting.
+
 Paste one or more YouTube video or Twitch VOD links, and this app downloads them, gets a
 transcript, asks an AI model to find the best moments, and cuts them into short clips - all
 running on your own machine. Nothing is hosted or uploaded anywhere except to OpenAI (for
