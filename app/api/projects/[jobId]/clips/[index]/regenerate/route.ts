@@ -34,7 +34,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   const body = await request.json().catch(() => ({}));
   const overrides: ClipRenderOverrides = {};
   if (typeof body?.vertical === "boolean") overrides.vertical = body.vertical;
-  if (body?.reframeStyle === "blur" || body?.reframeStyle === "crop") {
+  if (body?.reframeStyle === "blur" || body?.reframeStyle === "crop" || body?.reframeStyle === "gaming") {
     overrides.reframeStyle = body.reframeStyle as ReframeStyle;
   }
   if (typeof body?.burnCaptions === "boolean") overrides.burnCaptions = body.burnCaptions;
